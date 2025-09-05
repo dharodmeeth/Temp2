@@ -1,3 +1,7 @@
+MFSLPRD
+SUSIPRD
+DSAPRD
+
 
 SELECT
  ConfigurationName,ConfigurationValue,
