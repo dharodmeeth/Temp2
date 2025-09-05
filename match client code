@@ -1,0 +1,26 @@
+UPDATE T
+SET 
+    T.Message   = SJH.message,
+    T.EventDate = DATEADD(S, 
+                    (SJH.run_time / 10000) * 60 * 60 + 
+                    ((SJH.run_time - (SJH.run_time / 10000) * 10000) / 100) * 60 + 
+                    (SJH.run_time - (SJH.run_time / 100) * 100), 
+                    CONVERT(DATETIME, RTRIM(SJH.run_date), 113)),
+    T.Status    = CASE 
+                    WHEN SJH.run_status = 0 THEN 'Failed'
+                    WHEN SJH.run_status = 1 THEN 'Succeeded'
+                    WHEN SJH.run_status = 2 THEN 'Retry'
+                    WHEN SJH.run_status = 3 THEN 'Cancelled'
+                    ELSE 'Unknown'
+                  END
+FROM dbo.ETLClientInfo T
+JOIN msdb..sysjobs SJ
+    ON SJ.name LIKE '%' + T.ClientCode + '%'   -- match job name containing ClientCode
+CROSS APPLY (
+    SELECT TOP 1 *
+    FROM msdb..sysjobhistory H
+    WHERE H.job_id = SJ.job_id
+      AND H.step_id = 0
+    ORDER BY H.run_date DESC, H.run_time DESC
+) SJH
+WHERE SJ.name LIKE 'DXRA%';
