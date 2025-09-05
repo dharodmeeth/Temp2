@@ -1,0 +1,10 @@
+USE MFSLPRD
+
+--SELECT *   FROM dbo.ETL_configuration
+
+
+SELECT
+ ConfigurationName,ConfigurationValue,
+CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, ConfigurationEncrypted)) --AS ftpPassword 
+FROM dbo.ETL_configuration
+WHERE ConfigurationName in ('ClientID','ftpPassword', 'dbLevel','ftpUserName')
