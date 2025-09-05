@@ -1,5 +1,10 @@
-SELECT
-ConfigurationName,ConfigurationValue,
-CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, ConfigurationEncrypted)) AS ftpPassword 
+SELECT 
+    MAX(CASE WHEN ConfigurationName = 'ftpUserName' 
+             THEN ConfigurationValue END) AS ftpUserName,
+    MAX(CASE WHEN ConfigurationName = 'ftpPassword' 
+             THEN CONVERT(NVARCHAR(MAX), 
+                          DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, ConfigurationEncrypted)) END) AS ftpPassword,
+    MAX(CASE WHEN ConfigurationName = 'dbLevel' 
+             THEN ConfigurationValue END) AS dbLevel
 FROM dbo.ETL_configuration
-WHERE ConfigurationName in ('ftpPassword', 'dbLevel','ftpUserName')
+WHERE ConfigurationName IN ('ftpPassword', 'dbLevel', 'ftpUserName');
