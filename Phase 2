@@ -1,0 +1,21 @@
+USE DSAPRD
+
+SELECT *   FROM [dbo].[ETL_sources]
+
+C132641
+
+DROP SYMMETRIC KEY FTPPSWDKey
+DROP CERTIFICATE CertificateETLFTP
+DROP MASTER KEY 
+
+DECLARE @ReturnMessage NVARCHAR(max)
+EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT
+SELECT @ReturnMessage
+
+
+--INFINITY\FTP_DECSA
+--Password-   C5m6B(tP2SY69p
+
+
+
+EXEC [dbo].[BI_spETLConfigurationInsert] @clientid='C132641',@FtpPassword = 'C5m6B(tP2SY69p'
