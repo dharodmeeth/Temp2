@@ -1,12 +1,15 @@
-Client Code	
-Client Name 	
-Database Name	
-Hosted Server Name	
-DXRA FTP Account	
-Password	
-ETL Version	
-Active/Disable 	
-Job Name	
-Message	
-Date	
-Status
+CREATE TABLE dbo.ClientInfo (
+    ClientCode        VARCHAR(50)   NOT NULL,  -- Primary Key, unique code per client
+    ClientName        NVARCHAR(200) NOT NULL,  -- Allows Unicode, in case of special characters
+    DatabaseName      NVARCHAR(200) NULL,      -- Database logical name
+    HostedServerName  NVARCHAR(200) NULL,      -- Server hostname or alias
+    DxraFtpAccount    NVARCHAR(150) NULL,      -- FTP account username
+    PasswordHash      VARBINARY(256) NULL,     -- Store password securely (hashed, not plain text!)
+    EtlVersion        NVARCHAR(50)  NULL,      -- Version label/number
+    IsActive          BIT           NOT NULL DEFAULT 1, -- 1 = Active, 0 = Disabled
+    JobName           NVARCHAR(200) NULL,      -- Related job/process name
+    Message           NVARCHAR(MAX) NULL,      -- Log message or description
+    EventDate         DATETIME2(0)  NOT NULL DEFAULT SYSUTCDATETIME(), -- UTC timestamp
+    Status            NVARCHAR(50)  NULL,      -- Success/Failed/InProgress etc.
+    CONSTRAINT PK_ClientInfo PRIMARY KEY (ClientCode)
+);
