@@ -1,3 +1,14 @@
+ IF EXISTS (SELECT 1 FROM #ETLFailedLog)
+    BEGIN
+        DECLARE @body NVARCHAR(MAX);
+        DECLARE @ServerNames NVARCHAR(MAX);
+        DECLARE @subject NVARCHAR(512);
+
+        -- Get distinct server names safely
+        SELECT @ServerNames = STRING_AGG(ServerName, ', ')
+        FROM (SELECT DISTINCT ServerName FROM #ETLFailedLog) AS T;
+
+        -- Build HTML body
         SET @body = 
         N'<h3>ETL Execution Report for Failed Clients</h3>' +
         N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
