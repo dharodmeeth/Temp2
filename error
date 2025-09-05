@@ -1,10 +1,39 @@
-SELECT 
-    MAX(CASE WHEN ConfigurationName = 'ftpUserName' 
-             THEN ConfigurationValue END) AS ftpUserName,
-    MAX(CASE WHEN ConfigurationName = 'ftpPassword' 
-             THEN CONVERT(NVARCHAR(MAX), 
-                          DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, ConfigurationEncrypted)) END) AS ftpPassword,
-    MAX(CASE WHEN ConfigurationName = 'dbLevel' 
-             THEN ConfigurationValue END) AS dbLevel
-FROM dbo.ETL_configuration
-WHERE ConfigurationName IN ('ftpPassword', 'dbLevel', 'ftpUserName');
+DECLARE @db NVARCHAR(128)
+DECLARE @sql NVARCHAR(MAX)
+
+-- Cursor through all user databases
+DECLARE db_cursor CURSOR FOR
+SELECT name 
+FROM sys.databases 
+WHERE database_id > 4  -- exclude system DBs (master, model, msdb, tempdb)
+
+OPEN db_cursor  
+FETCH NEXT FROM db_cursor INTO @db  
+
+WHILE @@FETCH_STATUS = 0  
+BEGIN  
+    SET @sql = '
+    IF EXISTS (SELECT 1 
+               FROM ' + QUOTENAME(@db) + '.sys.tables 
+               WHERE name = ''ETL_configuration'')
+    BEGIN
+        PRINT ''Running on database: ' + @db + '''
+        SELECT 
+            ''' + @db + ''' AS DatabaseName,
+            MAX(CASE WHEN ConfigurationName = ''ftpUserName'' 
+                     THEN ConfigurationValue END) AS ftpUserName,
+            MAX(CASE WHEN ConfigurationName = ''ftpPassword'' 
+                     THEN CONVERT(NVARCHAR(MAX), 
+                                  DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) END) AS ftpPassword,
+            MAX(CASE WHEN ConfigurationName = ''dbLevel'' 
+                     THEN ConfigurationValue END) AS dbLevel
+        FROM ' + QUOTENAME(@db) + '.dbo.ETL_configuration
+        WHERE ConfigurationName IN (''ftpPassword'', ''dbLevel'', ''ftpUserName'');
+    END'
+    
+    EXEC sp_executesql @sql  
+    FETCH NEXT FROM db_cursor INTO @db  
+END  
+
+CLOSE db_cursor  
+DEALLOCATE db_cursor
