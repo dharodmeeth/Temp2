@@ -1,11 +1,5 @@
-
-  --Insertinto [dbo].[ETLClientInfo]
-
-  --ClientCode = 'C132641',
-  --ClientName = 'XYZ',
-  --DatabaseName = 'DSAPRD',
-  --HostedServerName = 'T1WBSCINVSQ05L1',
-  --DxraFtpAccount = 'ABC', 
-  --PasswordHash = Convert (VARBINARY(256),'C5m6B(tP2SY69p'),
-  --EtlVersion = 'DXRA22.1'
-  --where JobName = 'DXRA221_C230718_SUSIPRD'
+SELECT
+ConfigurationName,ConfigurationValue,
+CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, ConfigurationEncrypted)) AS ftpPassword 
+FROM dbo.ETL_configuration
+WHERE ConfigurationName in ('ftpPassword', 'dbLevel','ftpUserName')
