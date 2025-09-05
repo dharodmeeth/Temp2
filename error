@@ -82,3 +82,10 @@ DEALLOCATE db_cursor;
 SELECT *
 FROM #ETLResults
 ORDER BY DatabaseName;
+
+
+------------------------------------
+
+(1 row(s) affected)
+Msg 207, Level 16, State 1, Line 9
+Invalid column name 'ConfigurationEncrypted'.
