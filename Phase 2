@@ -1,21 +1,27 @@
-USE DSAPRD
+SELECT @SQL = STRING_AGG(
+    '
+    USE ' + QUOTENAME(DatabaseName) + ';
 
-SELECT *   FROM [dbo].[ETL_sources]
+    IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
+        DROP SYMMETRIC KEY FTPPSWDKey;
 
-C132641
+    IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
+        DROP CERTIFICATE CertificateETLFTP;
 
-DROP SYMMETRIC KEY FTPPSWDKey
-DROP CERTIFICATE CertificateETLFTP
-DROP MASTER KEY 
+    IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
+        DROP MASTER KEY;
 
-DECLARE @ReturnMessage NVARCHAR(max)
-EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT
-SELECT @ReturnMessage
+    DECLARE @ReturnMessage NVARCHAR(MAX);
+    EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
+    SELECT @ReturnMessage;
 
+    EXEC [dbo].[BI_spETLConfigurationInsert] 
+        @clientid    = ''' + ClientCode + ''',
+        @FtpPassword = ''' + CONVERT(VARCHAR(256), PasswordHash) + '''; 
 
---INFINITY\FTP_DECSA
---Password-   C5m6B(tP2SY69p
-
-
-
-EXEC [dbo].[BI_spETLConfigurationInsert] @clientid='C132641',@FtpPassword = 'C5m6B(tP2SY69p'
+    USE msdb;
+    EXEC msdb.dbo.sp_start_job @job_name = ''' + JobName + ''';'
+, CHAR(13) + CHAR(10))
+FROM dbo.ETLClientInfo
+WHERE Status = 'Failed'
+  AND IsActive = 1;
