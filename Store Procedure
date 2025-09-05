@@ -1,13 +1,19 @@
 ----------------------------------------------------------------------------------
--- Drop the procedure if it exists
+-- Procedure Name: dbo.ETLClientUpdate
+-- Description   : 
+--   This stored procedure performs ETL client updates in the following steps:
+--     1. Clears previous Message, EventDate, and Status columns.
+--     2. Updates each active client with the latest SQL Agent job run info.
+--     3. Handles failed clients by rerunning jobs and logging errors.
+--     4. Sends an HTML email report for failed clients with Status and EventDate.
+-- Owner         : Meeth Dharod
+-- Created On    : 2025-09-05
 ----------------------------------------------------------------------------------
+
 IF OBJECT_ID('dbo.ETLClientUpdate', 'P') IS NOT NULL
     DROP PROCEDURE dbo.ETLClientUpdate;
 GO
 
-----------------------------------------------------------------------------------
--- Create Stored Procedure
-----------------------------------------------------------------------------------
 CREATE PROCEDURE dbo.ETLClientUpdate
 AS
 BEGIN
@@ -27,7 +33,7 @@ BEGIN
     ----------------------------------------------------------------------------------
     UPDATE T
     SET 
-        T.JobName   = SJ.name,  -- update JobName as well
+        T.JobName   = SJ.name,
         T.Message   = SJH.message,
         T.EventDate = DATEADD(S, 
                         (SJH.run_time / 10000) * 60 * 60 + 
@@ -43,7 +49,7 @@ BEGIN
                       END
     FROM dbo.ETLClientInfo T
     JOIN msdb..sysjobs SJ
-        ON SJ.name LIKE '%' + T.ClientCode + '%'   -- match job name containing ClientCode
+        ON SJ.name LIKE '%' + T.ClientCode + '%'
     CROSS APPLY (
         SELECT TOP 1 *
         FROM msdb..sysjobhistory H
@@ -52,12 +58,11 @@ BEGIN
         ORDER BY H.run_date DESC, H.run_time DESC
     ) SJH
     WHERE SJ.name LIKE 'DXRA%'
-      AND T.IsActive = 1;   -- only active clients
+      AND T.IsActive = 1;
 
     ----------------------------------------------------------------------------------
     -- Step 3: Handle Failed Clients, Rerun Jobs, Log Errors
     ----------------------------------------------------------------------------------
-    -- Temporary table for logging only failed clients
     CREATE TABLE #ETLFailedLog (
         ClientCode NVARCHAR(50),
         DatabaseName SYSNAME,
@@ -70,7 +75,6 @@ BEGIN
 
     DECLARE @SQL NVARCHAR(MAX) = N'';
 
-    -- Build dynamic batch for all failed + active clients
     SELECT @SQL = STRING_AGG(
     '
     BEGIN TRY
@@ -112,7 +116,6 @@ BEGIN
     WHERE Status = 'Failed'
       AND IsActive = 1;
 
-    -- Execute the batch
     EXEC sp_executesql @SQL;
 
     ----------------------------------------------------------------------------------
@@ -140,8 +143,8 @@ BEGIN
     SET @body = @body + '</table>';
 
     EXEC msdb.dbo.sp_send_dbmail
-        @profile_name = 'YourMailProfile',                       -- replace with your DB Mail profile
-        @recipients   = 'person1@example.com;person2@example.com',  -- replace with recipients
+        @profile_name = 'YourMailProfile',
+        @recipients   = 'person1@example.com;person2@example.com',
         @subject      = 'ETL Execution Report - Failed Clients Only',
         @body         = @body,
         @body_format  = 'HTML';
