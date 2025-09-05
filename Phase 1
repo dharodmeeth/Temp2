@@ -1,12 +1,20 @@
-INSERT INTO dbo.ELTClientInfo (JobName, Message, EventDate, Status)
+-- Step 1: Clear columns before insert
+UPDATE dbo.ETLClientInfo
+SET 
+    Message   = NULL,
+    EventDate = NULL,
+    Status    = NULL;
+
+-- Step 2: Insert only the last run per job
+INSERT INTO dbo.ETLClientInfo (JobName, Message, EventDate, Status)
 SELECT 
     SJ.name AS JobName,
     SJH.message AS Message,
     DATEADD(S, 
-        (run_time / 10000) * 60 * 60 + 
-        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
-        (run_time - (run_time / 100) * 100), 
-        CONVERT(DATETIME, RTRIM(run_date), 113)) AS EventDate,
+        (SJH.run_time / 10000) * 60 * 60 + 
+        ((SJH.run_time - (SJH.run_time / 10000) * 10000) / 100) * 60 + 
+        (SJH.run_time - (SJH.run_time / 100) * 100), 
+        CONVERT(DATETIME, RTRIM(SJH.run_date), 113)) AS EventDate,
     CASE 
         WHEN SJH.run_status = 0 THEN 'Failed'
         WHEN SJH.run_status = 1 THEN 'Succeeded'
@@ -14,13 +22,12 @@ SELECT
         WHEN SJH.run_status = 3 THEN 'Cancelled'
         ELSE 'Unknown'
     END AS Status
-FROM msdb..sysjobhistory SJH  
-JOIN msdb..sysjobs SJ 
-    ON SJH.job_id = SJ.job_id  
-WHERE step_id = 0  
-  AND SJ.name LIKE 'DXRA%'									
-  AND DATEADD(S,  
-        (run_time / 10000) * 60 * 60 + 
-        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
-        (run_time - (run_time / 100) * 100),  
-        CONVERT(DATETIME, RTRIM(run_date), 113)) >= DATEADD(DAY, -1, GETDATE());
+FROM msdb..sysjobs SJ
+CROSS APPLY (
+    SELECT TOP 1 *
+    FROM msdb..sysjobhistory SJH
+    WHERE SJH.job_id = SJ.job_id
+      AND SJH.step_id = 0
+    ORDER BY SJH.run_date DESC, SJH.run_time DESC
+) SJH
+WHERE SJ.name LIKE 'DXRA%';
