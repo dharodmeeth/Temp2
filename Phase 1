@@ -1,0 +1,26 @@
+INSERT INTO dbo.ELTClientInfo (JobName, Message, EventDate, Status)
+SELECT 
+    SJ.name AS JobName,
+    SJH.message AS Message,
+    DATEADD(S, 
+        (run_time / 10000) * 60 * 60 + 
+        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
+        (run_time - (run_time / 100) * 100), 
+        CONVERT(DATETIME, RTRIM(run_date), 113)) AS EventDate,
+    CASE 
+        WHEN SJH.run_status = 0 THEN 'Failed'
+        WHEN SJH.run_status = 1 THEN 'Succeeded'
+        WHEN SJH.run_status = 2 THEN 'Retry'
+        WHEN SJH.run_status = 3 THEN 'Cancelled'
+        ELSE 'Unknown'
+    END AS Status
+FROM msdb..sysjobhistory SJH  
+JOIN msdb..sysjobs SJ 
+    ON SJH.job_id = SJ.job_id  
+WHERE step_id = 0  
+  AND SJ.name LIKE 'DXRA%'									
+  AND DATEADD(S,  
+        (run_time / 10000) * 60 * 60 + 
+        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
+        (run_time - (run_time / 100) * 100),  
+        CONVERT(DATETIME, RTRIM(run_date), 113)) >= DATEADD(DAY, -1, GETDATE());
