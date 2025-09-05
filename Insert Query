@@ -1,0 +1,17 @@
+This is Insert Query to Insert the Values manually 
+
+
+  --Update [dbo].[ETLClientInfo]
+  --Set 
+  --ClientCode = 'C230718',
+  --ClientName = 'XYZ',
+  --DatabaseName = 'SUSIPRD',
+  --HostedServerName = 'T1WBSCINVSQ05L1',
+  --DxraFtpAccount = 'ABC', 
+  --PasswordHash = Convert (VARBINARY(256),'NpZlk62VZBrf7M43'),
+  --EtlVersion = 'DXRA22.1'
+  --where JobName = 'DXRA221_C230718_SUSIPRD'
+
+
+----------------------------------------------------------------------------------------------------------------------
+
