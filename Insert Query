@@ -22,3 +22,27 @@ Select Query to Get Password
 FROM [dbo].[ETLClientInfo]
 WHERE ClientCode = 'C230718';
 
+
+------------------------------------------------
+
+INSERT INTO [dbo].[ETLClientInfo] 
+(
+    ClientCode,
+    ClientName,
+    DatabaseName,
+    HostedServerName,
+    DxraFtpAccount,
+    PasswordHash,
+    EtlVersion
+)
+VALUES
+(
+    'C132641',
+    'XYZ',
+    'DSAPRD',
+    'T1WBSCINVSQ05L1',
+    'ABC',
+    CONVERT(VARBINARY(256), 'C5m6B(tP2SY69p'),
+    'DXRA22.1'
+);
+
