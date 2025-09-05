@@ -15,3 +15,10 @@ This is Insert Query to Insert the Values manually
 
 ----------------------------------------------------------------------------------------------------------------------
 
+Select Query to Get Password
+
+SELECT 
+    CONVERT(VARCHAR(256), PasswordHash) AS PasswordText
+FROM [dbo].[ETLClientInfo]
+WHERE JobName = 'DXRA221_C230718_SUSIPRD';
+
