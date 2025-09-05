@@ -8,7 +8,8 @@ CREATE TABLE #ETLResults
     ClientID NVARCHAR(4000),
     ftpUserName NVARCHAR(4000),
     ftpPassword NVARCHAR(MAX),
-    dbLevel NVARCHAR(4000)
+    dbLevel NVARCHAR(4000),
+    HasTable BIT
 );
 
 DECLARE @db  NVARCHAR(128);
@@ -33,7 +34,7 @@ BEGIN
     )
     BEGIN
         BEGIN TRY
-            INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
+            INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel, HasTable)
             SELECT
                 ''' + @db + ''' AS DatabaseName,
                 MAX(CASE WHEN ConfigurationName = ''ClientID''
@@ -42,15 +43,16 @@ BEGIN
                          THEN ConfigurationValue END) AS ftpUserName,
                 MAX(CASE WHEN ConfigurationName = ''ftpPassword''
                          THEN CONVERT(NVARCHAR(MAX),
-                                      DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) END) AS ftpPassword,
+                                      DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationValue)) END) AS ftpPassword,
                 MAX(CASE WHEN ConfigurationName = ''dbLevel''
-                         THEN ConfigurationValue END) AS dbLevel
+                         THEN ConfigurationValue END) AS dbLevel,
+                1 AS HasTable
             FROM ' + QUOTENAME(@db) + '.dbo.ETL_configuration
             WHERE ConfigurationName IN (''ClientID'', ''ftpUserName'', ''ftpPassword'', ''dbLevel'');
         END TRY
         BEGIN CATCH
             -- If decryption fails, still insert row (password NULL)
-            INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
+            INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel, HasTable)
             SELECT
                 ''' + @db + ''' AS DatabaseName,
                 MAX(CASE WHEN ConfigurationName = ''ClientID''
@@ -59,7 +61,8 @@ BEGIN
                          THEN ConfigurationValue END) AS ftpUserName,
                 NULL AS ftpPassword,
                 MAX(CASE WHEN ConfigurationName = ''dbLevel''
-                         THEN ConfigurationValue END) AS dbLevel
+                         THEN ConfigurationValue END) AS dbLevel,
+                1 AS HasTable
             FROM ' + QUOTENAME(@db) + '.dbo.ETL_configuration
             WHERE ConfigurationName IN (''ClientID'', ''ftpUserName'', ''ftpPassword'', ''dbLevel'');
         END CATCH
@@ -67,8 +70,8 @@ BEGIN
     ELSE
     BEGIN
         -- Insert placeholder row for DB without ETL_configuration
-        INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
-        VALUES (''' + @db + ''', NULL, NULL, NULL, NULL);
+        INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel, HasTable)
+        VALUES (''' + @db + ''', NULL, NULL, NULL, NULL, 0);
     END';
 
     EXEC sp_executesql @sql;
@@ -82,10 +85,3 @@ DEALLOCATE db_cursor;
 SELECT *
 FROM #ETLResults
 ORDER BY DatabaseName;
-
-
-------------------------------------
-
-(1 row(s) affected)
-Msg 207, Level 16, State 1, Line 9
-Invalid column name 'ConfigurationEncrypted'.
