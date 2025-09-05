@@ -24,18 +24,17 @@ FETCH NEXT FROM db_cursor INTO @db;
 WHILE @@FETCH_STATUS = 0
 BEGIN
     SET @sql = '
-    IF EXISTS (
-        SELECT 1
-        FROM ' + QUOTENAME(@db) + '.sys.tables
-        WHERE name = ''ETL_configuration''
-    ) AND EXISTS (
-        SELECT 1
-        FROM ' + QUOTENAME(@db) + '.sys.columns
-        WHERE object_id = OBJECT_ID(''' + @db + '.dbo.ETL_configuration'')
-          AND name IN (''ConfigurationName'', ''ConfigurationValue'', ''ConfigurationEncrypted'')
-    )
+    USE ' + QUOTENAME(@db) + ';
+    
+    IF OBJECT_ID(''dbo.ETL_configuration'', ''U'') IS NOT NULL
+       AND EXISTS (
+           SELECT 1 
+           FROM sys.columns 
+           WHERE object_id = OBJECT_ID(''dbo.ETL_configuration'')
+             AND name IN (''ConfigurationName'', ''ConfigurationValue'', ''ConfigurationEncrypted'')
+       )
     BEGIN
-        INSERT INTO #ETLResults (DatabaseName, ConfigurationName, ConfigurationValue, ftpPassword)
+        INSERT INTO tempdb..#ETLResults (DatabaseName, ConfigurationName, ConfigurationValue, ftpPassword)
         SELECT
             ''' + @db + ''' AS DatabaseName,
             ConfigurationName,
@@ -43,12 +42,12 @@ BEGIN
             CONVERT(NVARCHAR(MAX),
                 DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)
             ) AS ftpPassword
-        FROM ' + QUOTENAME(@db) + '.dbo.ETL_configuration
+        FROM dbo.ETL_configuration
         WHERE ConfigurationName IN (''ClientID'', ''ftpPassword'', ''dbLevel'', ''ftpUserName'');
     END
     ELSE
     BEGIN
-        INSERT INTO #ETLResults (DatabaseName, ConfigurationName, ConfigurationValue, ftpPassword)
+        INSERT INTO tempdb..#ETLResults (DatabaseName, ConfigurationName, ConfigurationValue, ftpPassword)
         VALUES (''' + @db + ''', NULL, NULL, NULL);
     END';
 
