@@ -1,2 +1,36 @@
-Msg 102, Level 15, State 1, Procedure ETLClientUpdate, Line 155 [Batch Start Line 0]
-Incorrect syntax near '+'.
+        SET @body = 
+        N'<h3>ETL Execution Report for Failed Clients</h3>' +
+        N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
+        N'<tr style="background-color:lightblue;">
+<th>ClientCode</th><th>ServerName</th><th>DatabaseName</th>
+<th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
+        (
+            SELECT STRING_AGG(
+                N'<tr><td>' + ISNULL(REPLACE(ClientCode, '''', ''''''), '') + N'</td>' +
+                N'<td>' + ISNULL(REPLACE(ServerName, '''', ''''''), '') + N'</td>' +
+                N'<td>' + ISNULL(REPLACE(DatabaseName, '''', ''''''), '') + N'</td>' +
+                N'<td>' + ISNULL(REPLACE(JobName, '''', ''''''), '') + N'</td>' +
+                N'<td>' + ISNULL(REPLACE(Message, '''', ''''''), '') + N'</td>' +
+                N'<td>' + ISNULL(Status, '') + N'</td>' +
+                N'<td>' + ISNULL(CONVERT(VARCHAR(20), EventDate, 120), '') + N'</td></tr>'
+            , CHAR(13)+CHAR(10))
+            FROM #ETLFailedLog
+        );
+
+        SET @body = @body + N'</table>';
+
+        -- Build subject safely
+        SET @subject = N'ETL Execution Report - Failed Clients Only'
+                       + CASE WHEN @ServerNames IS NOT NULL THEN N' | Servers: ' + @ServerNames ELSE N'' END;
+
+        -- Send email
+        EXEC msdb.dbo.sp_send_dbmail
+            @profile_name = 'YourMailProfileName',  -- replace with your Database Mail profile
+            @recipients   = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
+            @subject      = @subject,
+            @body         = @body,
+            @body_format  = 'HTML';
+    END
+
+END
+GO
