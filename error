@@ -49,7 +49,7 @@ BEGIN
             WHERE ConfigurationName IN (''ClientID'', ''ftpUserName'', ''ftpPassword'', ''dbLevel'');
         END TRY
         BEGIN CATCH
-            -- If decryption fails (e.g., certificate missing in that DB), still return the row with NULL password
+            -- If decryption fails, still insert row (password NULL)
             INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
             SELECT
                 ''' + @db + ''' AS DatabaseName,
@@ -63,6 +63,12 @@ BEGIN
             FROM ' + QUOTENAME(@db) + '.dbo.ETL_configuration
             WHERE ConfigurationName IN (''ClientID'', ''ftpUserName'', ''ftpPassword'', ''dbLevel'');
         END CATCH
+    END
+    ELSE
+    BEGIN
+        -- Insert placeholder row for DB without ETL_configuration
+        INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
+        VALUES (''' + @db + ''', NULL, NULL, NULL, NULL);
     END';
 
     EXEC sp_executesql @sql;
