@@ -1,0 +1,150 @@
+----------------------------------------------------------------------------------
+-- Procedure Name: dbo.ETLClientUpdate
+-- Description   : 
+--   This stored procedure performs ETL client updates in the following steps:
+--     1. Clears previous Message, EventDate, and Status columns.
+--     2. Updates each active client with the latest SQL Agent job run info.
+--     3. Handles failed clients by rerunning jobs and logging errors.
+--     4. Sends an HTML email report for failed clients with Status and EventDate.
+-- Owner         : Meeth Dharod
+-- Created On    : 2025-09-05
+----------------------------------------------------------------------------------
+
+
+CREATE PROCEDURE dbo.ETLClientUpdate
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ----------------------------------------------------------------------------------
+    -- Step 1: Clear columns before insert
+    ----------------------------------------------------------------------------------
+    UPDATE dbo.ETLClientInfo
+    SET 
+        Message   = NULL,
+        EventDate = NULL,
+        Status    = NULL;
+
+    ----------------------------------------------------------------------------------
+    -- Step 2: Insert only the last run per job
+    ----------------------------------------------------------------------------------
+    UPDATE T
+    SET 
+        T.JobName   = SJ.name,
+        T.Message   = SJH.message,
+        T.EventDate = DATEADD(S, 
+                        (SJH.run_time / 10000) * 60 * 60 + 
+                        ((SJH.run_time - (SJH.run_time / 10000) * 10000) / 100) * 60 + 
+                        (SJH.run_time - (SJH.run_time / 100) * 100), 
+                        CONVERT(DATETIME, RTRIM(SJH.run_date), 113)),
+        T.Status    = CASE 
+                        WHEN SJH.run_status = 0 THEN 'Failed'
+                        WHEN SJH.run_status = 1 THEN 'Succeeded'
+                        WHEN SJH.run_status = 2 THEN 'Retry'
+                        WHEN SJH.run_status = 3 THEN 'Cancelled'
+                        ELSE 'Unknown'
+                      END
+    FROM dbo.ETLClientInfo T
+    JOIN msdb..sysjobs SJ
+        ON SJ.name LIKE '%' + T.ClientCode + '%'
+    CROSS APPLY (
+        SELECT TOP 1 *
+        FROM msdb..sysjobhistory H
+        WHERE H.job_id = SJ.job_id
+          AND H.step_id = 0
+        ORDER BY H.run_date DESC, H.run_time DESC
+    ) SJH
+    WHERE SJ.name LIKE 'DXRA%'
+      AND T.IsActive = 1;
+
+    ----------------------------------------------------------------------------------
+    -- Step 3: Handle Failed Clients, Rerun Jobs, Log Errors
+    ----------------------------------------------------------------------------------
+    CREATE TABLE #ETLFailedLog (
+        ClientCode NVARCHAR(50),
+        DatabaseName SYSNAME,
+        JobName NVARCHAR(128),
+        ServerName NVARCHAR(128),
+        Message NVARCHAR(MAX),
+        Status NVARCHAR(20),
+        EventDate DATETIME DEFAULT GETDATE()
+    );
+
+    DECLARE @SQL NVARCHAR(MAX) = N'';
+
+    SELECT @SQL = STRING_AGG(
+    '
+    BEGIN TRY
+        USE ' + QUOTENAME(DatabaseName) + ';
+
+        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
+            DROP SYMMETRIC KEY FTPPSWDKey;
+
+        IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
+            DROP CERTIFICATE CertificateETLFTP;
+
+        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
+            DROP MASTER KEY;
+
+        DECLARE @ReturnMessage NVARCHAR(MAX);
+        EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
+
+        EXEC [dbo].[BI_spETLConfigurationInsert] 
+            @clientid    = ''' + QUOTENAME(ClientCode, '''') + ''',
+            @FtpPassword = ''' + CONVERT(VARCHAR(256), PasswordHash) + '''; 
+
+        USE msdb;
+        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(JobName, '''') + ';
+
+    END TRY
+    BEGIN CATCH
+        INSERT INTO #ETLFailedLog (ClientCode, DatabaseName, JobName, ServerName, Message, Status)
+        VALUES (
+            ''' + REPLACE(ClientCode, '''', '''''') + ''', 
+            ''' + REPLACE(DatabaseName, '''', '''''') + ''', 
+            ''' + REPLACE(JobName, '''', '''''') + ''', 
+            ''' + REPLACE(HostedServerName, '''', '''''') + ''', 
+            ERROR_MESSAGE(),
+            ''Failed''
+        );
+    END CATCH
+    ', CHAR(13)+CHAR(10))
+    FROM dbo.ETLClientInfo
+    WHERE Status = 'Failed'
+      AND IsActive = 1;
+
+    EXEC sp_executesql @SQL;
+
+    ----------------------------------------------------------------------------------
+    -- Step 4: Send HTML Email Report for Failed Clients Only
+    ----------------------------------------------------------------------------------
+    DECLARE @body NVARCHAR(MAX);
+
+    SET @body = 
+    N'<h3>ETL Execution Report for Failed Clients</h3>' +
+    N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
+    N'<tr style="background-color:lightblue;"><th>ClientCode</th><th>ServerName</th><th>DatabaseName</th><th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
+    (
+        SELECT STRING_AGG(
+            '<tr><td>' + QUOTENAME(ClientCode, '''') + '</td>' +
+            '<td>' + QUOTENAME(ServerName, '''') + '</td>' +
+            '<td>' + QUOTENAME(DatabaseName, '''') + '</td>' +
+            '<td>' + QUOTENAME(JobName, '''') + '</td>' +
+            '<td>' + REPLACE(REPLACE(ISNULL(Message, ''), ''<'', ''&lt;'') , ''>'', ''&gt;'') + '</td>' +
+            '<td>' + Status + '</td>' +
+            '<td>' + CONVERT(VARCHAR(20), EventDate, 120) + '</td></tr>'
+        , CHAR(13)+CHAR(10))
+        FROM #ETLFailedLog
+    );
+
+    SET @body = @body + '</table>';
+
+    EXEC msdb.dbo.sp_send_dbmail
+        @profile_name = 'msdb..sysmail_profile',
+        @recipients   = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
+        @subject      = 'ETL Execution Report - Failed Clients Only',
+        @body         = @body,
+        @body_format  = 'HTML';
+
+END
+GO
