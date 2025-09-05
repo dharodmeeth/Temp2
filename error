@@ -1,4 +1,3 @@
--- Step 1: Create a temp table to store combined results
 CREATE TABLE #CombinedResults (
     DatabaseName NVARCHAR(50),
     ConfigurationName NVARCHAR(100),
@@ -6,7 +5,6 @@ CREATE TABLE #CombinedResults (
     ftpPassword NVARCHAR(MAX)
 );
 
--- Step 2: Declare cursor for database names
 DECLARE db_cursor CURSOR FOR
     SELECT name 
     FROM (VALUES 
@@ -23,17 +21,16 @@ FETCH NEXT FROM db_cursor INTO @DBName;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    -- Step 3: Build dynamic SQL for each database
     SET @SQL = N'
+    USE ' + QUOTENAME(@DBName) + ';
     INSERT INTO #CombinedResults (DatabaseName, ConfigurationName, ConfigurationValue, ftpPassword)
     SELECT ''' + @DBName + ''' AS DatabaseName,
            ConfigurationName,
            ConfigurationValue,
            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftpPassword
-    FROM ' + QUOTENAME(@DBName) + '.dbo.ETL_configuration
+    FROM dbo.ETL_configuration
     WHERE ConfigurationName IN (''ClientID'',''ftpPassword'',''dbLevel'',''ftpUserName'');';
 
-    -- Step 4: Execute the dynamic SQL
     EXEC sp_executesql @SQL;
 
     FETCH NEXT FROM db_cursor INTO @DBName;
@@ -42,8 +39,5 @@ END
 CLOSE db_cursor;
 DEALLOCATE db_cursor;
 
--- Step 5: Get combined results
 SELECT * FROM #CombinedResults;
-
--- Step 6: Drop temp table
 DROP TABLE #CombinedResults;
