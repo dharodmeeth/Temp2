@@ -1,3 +1,16 @@
+-- Temp table to collect results
+IF OBJECT_ID('tempdb..#ETLResults') IS NOT NULL
+    DROP TABLE #ETLResults;
+
+CREATE TABLE #ETLResults
+(
+    DatabaseName SYSNAME,
+    ClientID NVARCHAR(200),
+    ftpUserName NVARCHAR(4000),
+    ftpPassword NVARCHAR(MAX),
+    dbLevel NVARCHAR(4000)
+);
+
 DECLARE @db NVARCHAR(128)
 DECLARE @sql NVARCHAR(MAX)
 
@@ -17,9 +30,10 @@ BEGIN
                FROM ' + QUOTENAME(@db) + '.sys.tables 
                WHERE name = ''ETL_configuration'')
     BEGIN
-        PRINT ''Running on database: ' + @db + '''
+        INSERT INTO #ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
         SELECT 
             ''' + @db + ''' AS DatabaseName,
+            MAX(ClientID) AS ClientID,
             MAX(CASE WHEN ConfigurationName = ''ftpUserName'' 
                      THEN ConfigurationValue END) AS ftpUserName,
             MAX(CASE WHEN ConfigurationName = ''ftpPassword'' 
@@ -36,4 +50,7 @@ BEGIN
 END  
 
 CLOSE db_cursor  
-DEALLOCATE db_cursor
+DEALLOCATE db_cursor  
+
+-- Final output
+SELECT * FROM #ETLResults;
