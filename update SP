@@ -72,9 +72,9 @@ BEGIN
     DECLARE @SQL NVARCHAR(MAX) = N'';
 
     SELECT @SQL = STRING_AGG(
-    '
+    N'
     BEGIN TRY
-        USE ' + QUOTENAME(DatabaseName) + ';
+        USE ' + QUOTENAME(DatabaseName) + N';
 
         IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
             DROP SYMMETRIC KEY FTPPSWDKey;
@@ -89,20 +89,20 @@ BEGIN
         EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
 
         EXEC [dbo].[BI_spETLConfigurationInsert] 
-            @clientid    = ''' + QUOTENAME(ClientCode, '''') + ''',
-            @FtpPassword = ''' + REPLACE(Pwd, '''', '''''') + '''; 
+            @clientid    = ''' + REPLACE(ClientCode, '''', '''''') + ''',
+            @FtpPassword = ''' + REPLACE(ISNULL(Pwd, ''), '''', '''''') + '''; 
 
         USE msdb;
-        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(JobName, '''') + ';
+        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(JobName, '''') + N';
 
     END TRY
     BEGIN CATCH
         INSERT INTO #ETLFailedLog (ClientCode, DatabaseName, JobName, ServerName, Message, Status)
         VALUES (
-            ''' + REPLACE(ClientCode, '''', '''''') + ''', 
-            ''' + REPLACE(DatabaseName, '''', '''''') + ''', 
-            ''' + REPLACE(JobName, '''', '''''') + ''', 
-            ''' + REPLACE(HostedServerName, '''', '''''') + ''', 
+            ''' + REPLACE(ClientCode, '''', '''''') + N''', 
+            ''' + REPLACE(DatabaseName, '''', '''''') + N''', 
+            ''' + REPLACE(JobName, '''', '''''') + N''', 
+            ''' + REPLACE(HostedServerName, '''', '''''') + N''', 
             ERROR_MESSAGE(),
             ''Failed''
         );
@@ -112,7 +112,8 @@ BEGIN
     WHERE Status = 'Failed'
       AND IsActive = 1;
 
-    EXEC sp_executesql @SQL;
+    IF @SQL IS NOT NULL
+        EXEC sp_executesql @SQL;
 
     ----------------------------------------------------------------------------------
     -- Step 4: Send HTML Email Report for Failed Clients Only
@@ -122,24 +123,26 @@ BEGIN
     SET @body = 
     N'<h3>ETL Execution Report for Failed Clients</h3>' +
     N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
-    N'<tr style="background-color:lightblue;"><th>ClientCode</th><th>ServerName</th><th>DatabaseName</th><th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
+    N'<tr style="background-color:lightblue;">
+<th>ClientCode</th><th>ServerName</th><th>DatabaseName</th>
+<th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
     (
         SELECT STRING_AGG(
-            '<tr><td>' + QUOTENAME(ClientCode, '''') + '</td>' +
-            '<td>' + QUOTENAME(ServerName, '''') + '</td>' +
-            '<td>' + QUOTENAME(DatabaseName, '''') + '</td>' +
-            '<td>' + QUOTENAME(JobName, '''') + '</td>' +
-            '<td>' + REPLACE(REPLACE(ISNULL(Message, ''), ''<'', ''&lt;'') , ''>'', ''&gt;'') + '</td>' +
-            '<td>' + Status + '</td>' +
-            '<td>' + CONVERT(VARCHAR(20), EventDate, 120) + '</td></tr>'
+            N'<tr><td>' + ISNULL(REPLACE(ClientCode, '''', ''''''), '') + N'</td>' +
+            N'<td>' + ISNULL(REPLACE(ServerName, '''', ''''''), '') + N'</td>' +
+            N'<td>' + ISNULL(REPLACE(DatabaseName, '''', ''''''), '') + N'</td>' +
+            N'<td>' + ISNULL(REPLACE(JobName, '''', ''''''), '') + N'</td>' +
+            N'<td>' + ISNULL(REPLACE(Message, '''', ''''''), '') + N'</td>' +
+            N'<td>' + ISNULL(Status, '') + N'</td>' +
+            N'<td>' + ISNULL(CONVERT(VARCHAR(20), EventDate, 120), '') + N'</td></tr>'
         , CHAR(13)+CHAR(10))
         FROM #ETLFailedLog
     );
 
-    SET @body = @body + '</table>';
+    SET @body = @body + N'</table>';
 
     EXEC msdb.dbo.sp_send_dbmail
-        @profile_name = 'msdb..sysmail_profile',
+        @profile_name = 'YourMailProfileName',  -- replace with actual Database Mail profile name
         @recipients   = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
         @subject      = 'ETL Execution Report - Failed Clients Only',
         @body         = @body,
