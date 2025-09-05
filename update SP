@@ -10,7 +10,6 @@
 -- Created On    : 2025-09-05
 ----------------------------------------------------------------------------------
 
-
 CREATE PROCEDURE dbo.ETLClientUpdate
 AS
 BEGIN
@@ -91,7 +90,7 @@ BEGIN
 
         EXEC [dbo].[BI_spETLConfigurationInsert] 
             @clientid    = ''' + QUOTENAME(ClientCode, '''') + ''',
-            @FtpPassword = ''' + CONVERT(VARCHAR(256), PasswordHash) + '''; 
+            @FtpPassword = ''' + REPLACE(Pwd, '''', '''''') + '''; 
 
         USE msdb;
         EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(JobName, '''') + ';
