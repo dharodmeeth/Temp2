@@ -1,0 +1,15 @@
+ Update [dbo].[ETLClientInfo]
+  Set 
+  ClientCode = 'C230718',
+  ClientName = 'XYZ',
+  DatabaseName = 'SUSIPRD',
+  HostedServerName = 'T1WBSCINVSQ05L1',
+  DxraFtpAccount = 'ABC', 
+  PasswordHash = 'NpZlk62VZBrf7M43',
+  EtlVersion = 'DXRA22.1'
+  where JobName = 'DXRA221_C230718_SUSIPRD'
+
+
+
+Msg 257, Level 16, State 3, Line 18
+Implicit conversion from data type varchar to varbinary is not allowed. Use the CONVERT function to run this query.
