@@ -24,12 +24,9 @@ FETCH NEXT FROM db_cursor INTO @db;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
-    -- Dynamic SQL: switch context to DB, check table and column, then select
+    -- Build fully dynamic SQL for each database
     SET @sql = '
-    USE ' + QUOTENAME(@db) + ';
-
-    IF EXISTS (SELECT 1 FROM sys.tables WHERE name = ''ETL_configuration'')
-       AND EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(''dbo.ETL_configuration'') AND name = ''ConfigurationEncrypted'')
+    IF EXISTS (SELECT 1 FROM [' + @db + '].sys.tables WHERE name = ''ETL_configuration'')
     BEGIN
         INSERT INTO tempdb..#ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
         SELECT
@@ -40,16 +37,18 @@ BEGIN
                      CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted))
             END) AS ftpPassword,
             MAX(CASE WHEN ConfigurationName = ''dbLevel'' THEN ConfigurationValue END) AS dbLevel
-        FROM dbo.ETL_configuration
+        FROM [' + @db + '].dbo.ETL_configuration
         WHERE ConfigurationName IN (''ClientID'', ''ftpUserName'', ''ftpPassword'', ''dbLevel'');
     END
     ELSE
     BEGIN
         INSERT INTO tempdb..#ETLResults (DatabaseName, ClientID, ftpUserName, ftpPassword, dbLevel)
         VALUES (''' + @db + ''', NULL, NULL, NULL, NULL);
-    END';
+    END
+    ';
 
-    EXEC sp_executesql @sql;
+    -- Execute fully dynamic SQL
+    EXEC(@sql);
 
     FETCH NEXT FROM db_cursor INTO @db;
 END
