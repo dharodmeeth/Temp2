@@ -27,9 +27,9 @@ BEGIN
 
         IF @DBLevel IS NOT NULL
         BEGIN 
-            -- Insert or Update ClientInfo
+            -- Insert or Update ETLClientInfo
             SET @sql = N'
-            MERGE admindba.dbo.ClientInfo AS target
+            MERGE admindba.dbo.ETLClientInfo AS target
             USING (
                 SELECT
                     (SELECT TOP 1 ConfigurationValue 
@@ -71,4 +71,4 @@ CLOSE curDB
 DEALLOCATE curDB;
 
 -- Review results
-SELECT * FROM admindba.dbo.ClientInfo;
+SELECT * FROM admindba.dbo.ETLClientInfo;
