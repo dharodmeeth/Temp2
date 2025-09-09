@@ -82,33 +82,37 @@ BEGIN
 
         IF @DBLevel IS NOT NULL
         BEGIN 
-            -- Merge into ETLClientInfo
+            -- Merge into ETLClientInfo only if mandatory fields are not null
             SET @sql=N'
             MERGE admindba.dbo.ETLClientInfo AS target
             USING (
-                SELECT
-                    (SELECT TOP 1 ConfigurationValue 
-                     FROM ['+@DB+'].dbo.ETL_Configuration 
-                     WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+                SELECT *
+                FROM (
+                    SELECT
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ClientID'') AS ClientCode,
 
-                    (SELECT TOP 1 ConfigurationValue 
-                     FROM ['+@DB+'].dbo.ETL_Configuration 
-                     WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
 
-                    (SELECT TOP 1 ftppass 
-                     FROM admindba.dbo.mytest 
-                     WHERE dbname = '''+@DB+''') AS pwd,
+                        (SELECT TOP 1 ftppass 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS pwd,
 
-                    (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
-                     FROM admindba.dbo.mytest 
-                     WHERE dbname = '''+@DB+''') AS PasswordHash,
+                        (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS PasswordHash,
 
-                    '''+@DBLevel+''' AS EtlVersion,
+                        '''+@DBLevel+''' AS EtlVersion,
 
-                    '''+@DB+''' AS DatabaseName,
-                    CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-                    SYSUTCDATETIME() AS EventDate,
-                    1 AS IsActive
+                        '''+@DB+''' AS DatabaseName,
+                        CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
+                        SYSUTCDATETIME() AS EventDate,
+                        1 AS IsActive
+                ) AS src
+                WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND pwd IS NOT NULL
             ) AS source
             ON (target.ClientCode = source.ClientCode)
             WHEN MATCHED THEN
