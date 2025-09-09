@@ -27,24 +27,38 @@ BEGIN
 
         IF @DBLevel IS NOT NULL
         BEGIN 
-            -- Insert into dbo.ClientInfo
+            -- Insert or Update ClientInfo
             SET @sql = N'
-            INSERT INTO admindba.dbo.ClientInfo (ClientCode, DxraFtpAccount, EtlVersion, DatabaseName, HostedServerName, EventDate, IsActive)
-            SELECT 
-                (SELECT TOP 1 ConfigurationValue 
-                 FROM ['+@DB+'].dbo.ETL_Configuration 
-                 WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+            MERGE admindba.dbo.ClientInfo AS target
+            USING (
+                SELECT
+                    (SELECT TOP 1 ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName = ''ClientID'') AS ClientCode,
 
-                (SELECT TOP 1 ConfigurationValue 
-                 FROM ['+@DB+'].dbo.ETL_Configuration 
-                 WHERE ConfigurationName = ''ftpUserName'') AS DxraFtpAccount,
+                    (SELECT TOP 1 ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
 
-                '''+@DBLevel+''' AS EtlVersion,
+                    '''+@DBLevel+''' AS EtlVersion,
 
-                '''+@DB+''' AS DatabaseName,
-                CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS HostedServerName,
-                SYSUTCDATETIME() AS EventDate,
-                1 AS IsActive;';
+                    '''+@DB+''' AS DatabaseName,
+                    CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS HostedServerName,
+                    SYSUTCDATETIME() AS EventDate,
+                    1 AS IsActive
+            ) AS source
+            ON (target.ClientCode = source.ClientCode)
+            WHEN MATCHED THEN
+                UPDATE SET 
+                    target.FtpUserName      = source.FtpUserName,
+                    target.EtlVersion       = source.EtlVersion,
+                    target.DatabaseName     = source.DatabaseName,
+                    target.HostedServerName = source.HostedServerName,
+                    target.EventDate        = source.EventDate,
+                    target.IsActive         = source.IsActive
+            WHEN NOT MATCHED THEN
+                INSERT (ClientCode, FtpUserName, EtlVersion, DatabaseName, HostedServerName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.EtlVersion, source.DatabaseName, source.HostedServerName, source.EventDate, source.IsActive);';
             
             PRINT @sql;
             EXEC (@sql);
@@ -56,4 +70,5 @@ END
 CLOSE curDB  
 DEALLOCATE curDB;
 
+-- Review results
 SELECT * FROM admindba.dbo.ClientInfo;
