@@ -1,29 +1,26 @@
-USE [ADMINDBA]
-GO
-
-/****** Object:  StoredProcedure [dbo].[ETLClientUpdate]    Script Date: 9/9/2025 6:33:26 PM ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-----------------------------------------------------------------------------------
--- Procedure Name: dbo.ETLClientUpdate
--- Description   : 
---   This stored procedure performs ETL client updates in the following steps:
---     1. Clears previous Message, EventDate, and Status columns.
---     2. Updates each active client with the latest SQL Agent job run info.
---     3. Handles failed clients by rerunning jobs and logging errors.
---     4. Sends an HTML email report for failed clients with Status and EventDate.
--- Owner         : Meeth Dharod
--- Created On    : 2025-09-05
-----------------------------------------------------------------------------------
-
 ALTER PROCEDURE [dbo].[ETLClientUpdate]
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    ----------------------------------------------------------------------------------
+    -- Step 0: Update IsActive flag based on whether DXRA job exists & is enabled
+    ----------------------------------------------------------------------------------
+    UPDATE T
+    SET IsActive =
+        CASE 
+            WHEN J.job_id IS NOT NULL AND J.enabled = 1 THEN 1
+            ELSE 0
+        END
+    FROM dbo.ETLClientInfo T
+    LEFT JOIN msdb.dbo.sysjobs J
+        ON (
+               J.name LIKE 'DXRA%' 
+           AND (
+                   J.name LIKE '%' + T.ClientCode + '%'
+                OR J.name LIKE '%' + T.DatabaseName + '%'
+               )
+           );
 
     ----------------------------------------------------------------------------------
     -- Step 1: Clear columns before insert
@@ -33,7 +30,7 @@ BEGIN
         Message   = NULL,
         EventDate = NULL,
         Status    = NULL,
-		JobName	  = NULL;
+        JobName   = NULL;
 
     ----------------------------------------------------------------------------------
     -- Step 2: Insert only the last run per job
@@ -57,6 +54,7 @@ BEGIN
     FROM dbo.ETLClientInfo T
     JOIN msdb..sysjobs SJ
         ON SJ.name LIKE '%' + T.ClientCode + '%'
+        OR SJ.name LIKE '%' + T.DatabaseName + '%'
     CROSS APPLY (
         SELECT TOP 1 *
         FROM msdb..sysjobhistory H
@@ -129,7 +127,7 @@ BEGIN
     ----------------------------------------------------------------------------------
     -- Step 4: Send HTML Email Report for Failed Clients Only
     ----------------------------------------------------------------------------------
- IF EXISTS (SELECT 1 FROM #ETLFailedLog)
+    IF EXISTS (SELECT 1 FROM #ETLFailedLog)
     BEGIN
         DECLARE @body NVARCHAR(MAX);
         DECLARE @ServerNames NVARCHAR(MAX);
@@ -173,9 +171,5 @@ BEGIN
             @body         = @body,
             @body_format  = 'HTML';
     END
-
 END
-
 GO
-
-
