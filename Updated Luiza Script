@@ -39,7 +39,7 @@ BEGIN
             SET @sql=N'USE '+@DB+';
 INSERT INTO admindba.dbo.mytest
 SELECT TOP(1) DB_NAME() AS DBName,
-       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftpPassword
+       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
 FROM dbo.ETL_Configuration 
 WHERE ConfigurationName = ''ftpPassword'';';
             
@@ -53,10 +53,10 @@ END
 CLOSE curDB  
 DEALLOCATE curDB;
 
--- Review staging table
+-- Optional: review staging table
 SELECT * FROM admindba.dbo.mytest;
 
--- Step 2: Merge data into ETLClientInfo
+-- Step 2: Merge data into ETLClientInfo with PasswordHash converted to VARBINARY and pwd column
 DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
    SELECT [name]   
    FROM master..sysdatabases 
@@ -97,6 +97,10 @@ BEGIN
 
                     (SELECT TOP 1 ftppass 
                      FROM admindba.dbo.mytest 
+                     WHERE dbname = '''+@DB+''') AS pwd,
+
+                    (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
+                     FROM admindba.dbo.mytest 
                      WHERE dbname = '''+@DB+''') AS PasswordHash,
 
                     '''+@DBLevel+''' AS EtlVersion,
@@ -110,6 +114,7 @@ BEGIN
             WHEN MATCHED THEN
                 UPDATE SET 
                     target.FtpUserName  = source.FtpUserName,
+                    target.pwd          = source.pwd,
                     target.PasswordHash = source.PasswordHash,
                     target.EtlVersion   = source.EtlVersion,
                     target.DatabaseName = source.DatabaseName,
@@ -117,8 +122,8 @@ BEGIN
                     target.EventDate    = source.EventDate,
                     target.IsActive     = source.IsActive
             WHEN NOT MATCHED THEN
-                INSERT (ClientCode, FtpUserName, PasswordHash, EtlVersion, DatabaseName, ServerName, EventDate, IsActive)
-                VALUES (source.ClientCode, source.FtpUserName, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.EventDate, source.IsActive);';
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.EventDate, source.IsActive);';
             
             PRINT @sql;
             EXEC (@sql);
@@ -130,5 +135,5 @@ END
 CLOSE curDB2
 DEALLOCATE curDB2;
 
--- Final review
+-- Final review of ETLClientInfo
 SELECT * FROM admindba.dbo.ETLClientInfo;
