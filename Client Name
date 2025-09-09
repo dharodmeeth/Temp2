@@ -56,7 +56,7 @@ DEALLOCATE curDB;
 -- Optional: review staging table
 SELECT * FROM admindba.dbo.mytest;
 
--- Step 2: Merge data into ETLClientInfo with PasswordHash converted to VARBINARY and pwd column
+-- Step 2: Merge data into ETLClientInfo with ClientName directly from dbo.Client
 DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
    SELECT [name]   
    FROM master..sysdatabases 
@@ -82,7 +82,7 @@ BEGIN
 
         IF @DBLevel IS NOT NULL
         BEGIN 
-            -- Merge into ETLClientInfo only if mandatory fields are not null
+            -- Merge into ETLClientInfo with ClientName from dbo.Client
             SET @sql=N'
             MERGE admindba.dbo.ETLClientInfo AS target
             USING (
@@ -110,6 +110,13 @@ BEGIN
                         '''+@DB+''' AS DatabaseName,
                         CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
 
+                        -- Get ClientName from dbo.Client using prefix match
+                        (SELECT c.ClientName
+                         FROM admindba.dbo.Client c
+                         WHERE c.IsActive = 1
+                           AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
+                        ) AS ClientName,
+
                         SYSUTCDATETIME() AS EventDate,
                         1 AS IsActive
                 ) AS src
@@ -124,11 +131,12 @@ BEGIN
                     target.EtlVersion   = source.EtlVersion,
                     target.DatabaseName = source.DatabaseName,
                     target.ServerName   = source.ServerName,
+                    target.ClientName   = source.ClientName,
                     target.EventDate    = source.EventDate,
                     target.IsActive     = source.IsActive
             WHEN NOT MATCHED THEN
-                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, EventDate, IsActive)
-                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.EventDate, source.IsActive);';
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
             
             PRINT @sql;
             EXEC (@sql);
@@ -139,14 +147,6 @@ END
 
 CLOSE curDB2
 DEALLOCATE curDB2;
-
--- Step 3: Update ClientName in ETLClientInfo from dbo.Client using DB prefix
-UPDATE e
-SET e.ClientName = c.ClientName
-FROM admindba.dbo.ETLClientInfo e
-INNER JOIN admindba.dbo.Client c
-    ON c.IsActive = 1
-   AND LEFT(e.DatabaseName, LEN(c.ClientDBPrefix)) = c.ClientDBPrefix;
 
 -- Final review of ETLClientInfo
 SELECT * FROM admindba.dbo.ETLClientInfo;
