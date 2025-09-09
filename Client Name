@@ -1,1 +1,14 @@
 select * from admindba.dbo.client where isactive=1 order by clientname
+
+
+
+-- Test prefix match before updating
+SELECT 
+    e.DatabaseName,
+    c.ClientDBPrefix,
+    c.ClientName
+FROM admindba.dbo.ETLClientInfo e
+INNER JOIN admindba.dbo.Client c
+    ON c.IsActive = 1
+   AND LEFT(e.DatabaseName, LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
+ORDER BY e.DatabaseName;
