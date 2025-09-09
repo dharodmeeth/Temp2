@@ -1,0 +1,92 @@
+DECLARE @sql NVARCHAR(max), @DBLevel   NVARCHAR(250),@LICLevel NVARCHAR(250)
+DECLARE @DB sysname  
+DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM master..sysdatabases 
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+--and ( (name like 'demo%' or name like 'sandbbox%' or name like 'inv%' or name like 'LPMS%' 
+and  name not like '%SP'
+and name not like '%snapshot%'
+and name not like '%stg'
+
+   ORDER BY [name] 
+
+ drop table admindba.dbo.mytest
+create table admindba.dbo.mytest
+ (dbname varchar(100),ftppass varchar(100))
+ 
+      
+OPEN curDB  
+FETCH NEXT FROM curDB INTO @DB  
+WHILE @@FETCH_STATUS = 0  
+   BEGIN 
+   	IF object_id(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+	BEGIN 
+	 SET  @sql =N'select @DBLevel=configurationvalue FROM ['+@DB+'].dbo.ETL_Configuration WHERE configurationname LIKE ''ftpUserName''' 
+	 EXECUTE sp_executesql @sql, 
+			N'@DBLevel  NVARCHAR(250) OUTPUT', 
+			@DBLevel = @DBLevel  OUTPUT;
+			--Check DB Level	
+		IF 	(@DBLevel <> 'ftpUserName'  )
+		
+			BEGIN 
+			SET @sql=N' USE '+@DB+'
+insert into admindba.dbo.mytest SELECT top(1) DB_NAME() AS DBName,			
+--configurationvalue FROM dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'' ,
+--select 
+CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftpPassword 
+FROM dbo.ETL_Configuration WHERE ConfigurationName = ''ftpPassword''
+
+			'
+			
+			print @sql			
+			EXECUTE  (@sql)
+
+			END 
+		END 
+       FETCH NEXT FROM curDB INTO @DB  
+   END  
+CLOSE curDB  
+DEALLOCATE curDB
+
+
+select * from admindba.dbo.mytest
+
+--DECLARE @sql NVARCHAR(max)
+DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [dbname]   , ftppass
+   FROM admindba.dbo.mytest
+   WHERE ftppass is not null
+   ORDER BY [dbname] 
+
+ drop table admindba.dbo.mytest2
+create table admindba.dbo.mytest2
+ (dbname varchar(100),ftppass varchar(100), ftpacct varchar(100))
+ declare @db1 nvarchar(100), @db2 nvarchar(100)
+      
+OPEN curDB2  
+FETCH NEXT FROM curDB2 INTO @DB1,@db2  
+WHILE @@FETCH_STATUS = 0  
+   BEGIN 
+if @db2 is not null
+		
+			BEGIN 
+			SET @sql=N' USE '+@DB1+'
+insert into admindba.dbo.mytest2 SELECT '+''''+@db1+''''+','+''''+@db2+''''+',		
+ configurationvalue FROM dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'' 
+
+			'
+			
+			print @sql			
+			EXECUTE  (@sql)
+
+			END 
+		--END 
+       FETCH NEXT FROM curDB2 INTO @DB1,@db2 
+   END  
+CLOSE curDB2  +
+DEALLOCATE curDB2
+
+
+select * from admindba.dbo.mytest
+
