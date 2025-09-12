@@ -1,31 +1,30 @@
-SELECT name, TYPE_NAME(system_type_id) AS DataType
-FROM sys.columns
-WHERE user_type_id = TYPE_ID('sysname');
-
-
--- Step 1 & 2: Compare publication names using three-part names
-USE YourPublicationDatabase;
-GO
-
-WITH PublicationDB AS (
-    SELECT 
-        publication_id,
-        LTRIM(RTRIM(publication)) AS PublicationName
-    FROM sys.publications
-),
-DistributionDB AS (
-    SELECT 
-        publisher_db,
-        LTRIM(RTRIM(publication)) AS PublicationName
-    FROM distribution.dbo.MSpublications
-    WHERE publisher_db = 'YourPublicationDatabase'
-)
-SELECT p.PublicationName AS PublicationDBName,
-       d.PublicationName AS DistributionDBName,
-       CASE 
-           WHEN p.PublicationName = d.PublicationName THEN 'Match'
-           ELSE 'Mismatch'
-       END AS Status
-FROM PublicationDB p
-FULL OUTER JOIN DistributionDB d
-    ON p.PublicationName = d.PublicationName;
+We got a notification. subject: , msg: Task has encountered error 1022502. Error: RetCode: SQL_ERROR  SqlState: 25000 NativeError: 3906 Message: [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Failed to update database "LGTEUUAT" because the database is read-only. Line: 1 Column: -1
+Failed (retcode -1) to execute statement: 
+if not exists (select name from syspublications where name=N'AR_PUBLICATION_00019')
+exec sp_addpublication
+  @publication = N'AR_PUBLICATION_00019',
+  @description = N'Qlik Replicate: Anonymous Transactional publication for Database: LGTEUUAT , from Publisher: INVSEUSQUA01.',
+  @sync_method = N'native',
+  @retention = 1,
+  @allow_push = N'true',
+  @allow_pull = N'true',
+  @allow_anonymous = N'true',
+  @enabled_for_internet = N'false',
+  @snapshot_in_defaultfolder = N'true',
+  @compress_snapshot = N'false',
+  @ftp_port = 21,
+  @ftp_login = N'anonymous',
+  @allow_subscription_copy = N'false',
+  @add_to_active_directory = N'false',
+  @repl_freq = N'continuous',
+  @status = N'active',
+  @independent_agent = N'true',
+  @immediate_sync = N'true',
+  @allow_sync_tran = N'false',
+  @autogen_sync_procs = N'false',
+  @allow_queued_tran = N'false',
+  @allow_dts = N'false',
+  @replicate_ddl = 1,
+  @allow_initialize_from_backup = N'false',
+  @enabled_for_p2p = N'false',
+  @enabled_for_het_sub = N'false'
