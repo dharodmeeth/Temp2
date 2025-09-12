@@ -3,7 +3,7 @@ FROM sys.columns
 WHERE user_type_id = TYPE_ID('sysname');
 
 
--- Step 1: Get publication names from the publication database
+-- Step 1 & 2: Compare publication names using three-part names
 USE YourPublicationDatabase;
 GO
 
@@ -12,20 +12,14 @@ WITH PublicationDB AS (
         publication_id,
         LTRIM(RTRIM(publication)) AS PublicationName
     FROM sys.publications
-)
-
--- Step 2: Get publication names from the distribution database
-, DistributionDB AS (
-    USE distribution;
-
+),
+DistributionDB AS (
     SELECT 
         publisher_db,
         LTRIM(RTRIM(publication)) AS PublicationName
-    FROM MSpublications
+    FROM distribution.dbo.MSpublications
     WHERE publisher_db = 'YourPublicationDatabase'
 )
-
--- Step 3: Compare the two sets
 SELECT p.PublicationName AS PublicationDBName,
        d.PublicationName AS DistributionDBName,
        CASE 
@@ -35,11 +29,3 @@ SELECT p.PublicationName AS PublicationDBName,
 FROM PublicationDB p
 FULL OUTER JOIN DistributionDB d
     ON p.PublicationName = d.PublicationName;
-
-Msg 156, Level 15, State 1, Line 14
-Incorrect syntax near the keyword 'USE'.
-Msg 102, Level 15, State 1, Line 21
-Incorrect syntax near ')'.
-
-Completion time: 2025-09-12T03:37:19.7270579+02:00
-
