@@ -35,3 +35,11 @@ SELECT p.PublicationName AS PublicationDBName,
 FROM PublicationDB p
 FULL OUTER JOIN DistributionDB d
     ON p.PublicationName = d.PublicationName;
+
+Msg 156, Level 15, State 1, Line 14
+Incorrect syntax near the keyword 'USE'.
+Msg 102, Level 15, State 1, Line 21
+Incorrect syntax near ')'.
+
+Completion time: 2025-09-12T03:37:19.7270579+02:00
+
