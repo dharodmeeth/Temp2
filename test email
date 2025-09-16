@@ -1,0 +1,18 @@
+-- Send a test email via Database Mail
+EXEC msdb.dbo.sp_send_dbmail
+    @profile_name = 'YourMailProfile',         -- Replace with your DB Mail profile name
+    @recipients   = 'YourDLGroup@domain.com',  -- Replace with your DL group email address
+    @subject      = 'Test Email from SQL Server',
+    @body         = 'This is a test email sent from SQL Server Database Mail to verify the DL group.';
+
+
+
+--Make sure Database Mail is configured and enabled.
+
+EXEC sp_configure 'Database Mail XPs', 1;
+RECONFIGURE;
+
+
+SELECT * 
+FROM msdb.dbo.sysmail_event_log
+ORDER BY log_date DESC;
