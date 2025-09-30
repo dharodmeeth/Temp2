@@ -1,6 +1,164 @@
-Msg 102, Level 15, State 1, Procedure usp_UpdateETLClientInfo, Line 44 [Batch Start Line 7]
-Incorrect syntax near ';'.
-Msg 156, Level 15, State 1, Line 66
-Incorrect syntax near the keyword 'DECLARE'.
-Msg 102, Level 15, State 1, Line 213
-Incorrect syntax near 'END'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 17
+Invalid column name 'ftppass'.
+Msg 207, Level 16, State 1, Line 21
+Invalid column name 'ftppass'.
+
+(1 row affected)
+
+Completion time: 2025-09-30T16:38:26.9606328-04:00
