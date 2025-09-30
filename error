@@ -29,6 +29,7 @@ WHILE @@FETCH_STATUS = 0
 BEGIN 
     IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
+        -- Get ftpUserName (checking DB level)
         SET @sql = N'SELECT @DBLevel=ConfigurationValue 
                      FROM ['+@DB+'].dbo.ETL_Configuration 
                      WHERE ConfigurationName LIKE ''ftpUserName'''; 
@@ -38,6 +39,7 @@ BEGIN
 
         IF @DBLevel <> 'ftpUserName'
         BEGIN 
+            -- Insert decrypted ftpPassword into staging table
             SET @sql=N'USE '+@DB+';
 INSERT INTO admindba.dbo.mytest
 SELECT TOP(1) DB_NAME() AS DBName,
@@ -58,10 +60,10 @@ DEALLOCATE curDB;
 -- Optional: review staging table
 SELECT * FROM admindba.dbo.mytest;
 
+-- ===========================================
+-- Step 2: Merge multiple ClientCodes with their own FTP + password per database
+-- ===========================================
 
--- ===========================================
--- Step 2: Merge multiple ClientCodes and unique credentials (group FTPs by password)
--- ===========================================
 DECLARE curDB CURSOR FOR  
 SELECT [name]   
 FROM master..sysdatabases 
@@ -79,51 +81,46 @@ BEGIN
     IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
         SET @sql = N'
-        ;WITH ClientCTE AS (
-            SELECT DISTINCT ConfigurationValue AS ClientCode
-            FROM ['+@DB+'].dbo.ETL_Configuration
-            WHERE ConfigurationName = ''ClientID''
-        ),
-        -- Group FTP usernames by the decrypted password, so identical passwords collapse into one credential
-        FtpCTE AS (
-            SELECT MIN(e.ConfigurationValue) AS FtpUserName, m.ftppass
-            FROM ['+@DB+'].dbo.ETL_Configuration e
-            LEFT JOIN admindba.dbo.mytest m
+        ;WITH PwdCTE AS (
+            SELECT c.ConfigurationValue AS ClientCode,
+                   u.ConfigurationValue AS FtpUserName,
+                   m.ftppass
+            FROM ['+@DB+'].dbo.ETL_Configuration c
+            INNER JOIN ['+@DB+'].dbo.ETL_Configuration u
+                ON u.ConfigurationName = ''ftpUserName''
+            INNER JOIN admindba.dbo.mytest m
                 ON m.dbname = '''+@DB+'''
-            WHERE e.ConfigurationName = ''ftpUserName''
+            WHERE c.ConfigurationName = ''ClientID''
               AND m.ftppass IS NOT NULL
-            GROUP BY m.ftppass
         )
         MERGE admindba.dbo.ETLClientInfo AS target
         USING (
             SELECT
-                c.ClientCode,
-                f.FtpUserName,
-                f.ftppass AS pwd,
-                CONVERT(VARBINARY(256), f.ftppass) AS PasswordHash,
+                p.ClientCode,
+                p.FtpUserName,
+                p.ftppass AS pwd,
+                CONVERT(VARBINARY(256), p.ftppass) AS PasswordHash,
                 '''+@DB+''' AS DatabaseName,
                 CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
                 cl.ClientName,
                 SYSUTCDATETIME() AS EventDate,
                 1 AS IsActive
-            FROM ClientCTE c
-            CROSS JOIN FtpCTE f
+            FROM PwdCTE p
             LEFT JOIN admindba.dbo.Client cl
                 ON cl.IsActive = 1
                 AND LEFT('''+@DB+''', LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
         ) AS source
         ON target.ClientCode = source.ClientCode 
            AND target.DatabaseName = source.DatabaseName
-           AND target.PasswordHash = source.PasswordHash   -- key uniqueness by client + db + password
+           AND target.FtpUserName = source.FtpUserName
         WHEN MATCHED THEN
             UPDATE SET 
-                target.FtpUserName   = source.FtpUserName,
-                target.pwd           = source.pwd,
-                target.PasswordHash  = source.PasswordHash,
-                target.ServerName    = source.ServerName,
-                target.ClientName    = source.ClientName,
-                target.EventDate     = source.EventDate,
-                target.IsActive      = source.IsActive
+                target.pwd          = source.pwd,
+                target.PasswordHash = source.PasswordHash,
+                target.ServerName   = source.ServerName,
+                target.ClientName   = source.ClientName,
+                target.EventDate    = source.EventDate,
+                target.IsActive     = source.IsActive
         WHEN NOT MATCHED THEN
             INSERT (ClientCode, FtpUserName, pwd, PasswordHash, DatabaseName, ServerName, ClientName, EventDate, IsActive)
             VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
