@@ -53,9 +53,8 @@ BEGIN
     -----------------------------
     -- Step 1: Create/Truncate staging table
     -----------------------------
-    IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL
-        TRUNCATE TABLE admindba.dbo.mytest;
-    ELSE
+    IF OBJECT_ID('admindba.dbo.mytest','U') IS NULL
+    BEGIN
         EXEC('
         CREATE TABLE admindba.dbo.mytest
         (
@@ -63,6 +62,9 @@ BEGIN
             ftppass NVARCHAR(256)
         )
         ');
+    END
+    ELSE
+        EXEC('TRUNCATE TABLE admindba.dbo.mytest');
 
     -----------------------------
     -- Step 2: Collect ftpPassword from all databases into staging table
@@ -97,13 +99,13 @@ BEGIN
 
             IF @DBLevel <> 'ftpUserName'
             BEGIN 
-                -- Insert decrypted ftpPassword into staging table
-                SET @sql=N'
-INSERT INTO admindba.dbo.mytest
-SELECT TOP(1) DB_NAME() AS DBName,
-       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
-FROM ['+@DB+'].dbo.ETL_Configuration
-WHERE ConfigurationName = ''ftpPassword'';';
+                -- Insert decrypted ftpPassword into staging table dynamically
+                SET @sql = '
+                INSERT INTO admindba.dbo.mytest (dbname, ftppass)
+                SELECT TOP(1) DB_NAME() AS dbname,
+                       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
+                FROM ['+@DB+'].dbo.ETL_Configuration
+                WHERE ConfigurationName = ''ftpPassword''';
                 
                 EXEC (@sql);
             END
@@ -142,7 +144,7 @@ WHERE ConfigurationName = ''ftpPassword'';';
 
             IF @DBLevel IS NOT NULL
             BEGIN 
-                -- Fully dynamic MERGE including ftppass reference
+                -- Merge into ETLClientInfo dynamically
                 SET @sql=N'
 MERGE admindba.dbo.ETLClientInfo AS target
 USING (
@@ -157,13 +159,9 @@ USING (
              FROM ['+@DB+'].dbo.ETL_Configuration 
              WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
 
-            (SELECT TOP 1 ftppass 
-             FROM admindba.dbo.mytest WITH (NOLOCK)
-             WHERE dbname = '''+@DB+''') AS pwd,
+            (SELECT TOP 1 ftppass FROM admindba.dbo.mytest WHERE dbname = '''+@DB+''') AS pwd,
 
-            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
-             FROM admindba.dbo.mytest WITH (NOLOCK)
-             WHERE dbname = '''+@DB+''') AS PasswordHash,
+            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) FROM admindba.dbo.mytest WHERE dbname = '''+@DB+''') AS PasswordHash,
 
             '''+@DBLevel+''' AS EtlVersion,
 
