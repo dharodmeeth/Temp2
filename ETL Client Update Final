@@ -6,30 +6,13 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-----------------------------------------------------------------------------------
--- Procedure Name : dbo.ETLClientUpdate
--- Description    : 
---   This stored procedure performs ETL client updates in the following steps:
---     1. Clears previous Message, EventDate, Status, and JobName columns.
---     2. Updates each active client with the latest SQL Agent job run info.
---     3. Logs all clients (Success / Failed / Null) into dbo.ETLFailedLog with RunID and StatusType.
---     4a. Runs one-time database initialization (keys, certs, master key) per Database.
---     4b. Executes ETL configuration insert + job start for each failed client.
---     5. Sends an HTML email report for failed/null clients for the current run only.
---     6. Deletes logs older than 10 days.
---
--- Owner          : Meeth Dharod
--- Created On     : 2025-09-05
--- Last Modified  : 2025-09-30
-----------------------------------------------------------------------------------
-
 CREATE OR ALTER PROCEDURE [dbo].[ETLClientUpdate]
 AS
 BEGIN
     SET NOCOUNT ON;
 
     ----------------------------------------------------------------------------------
-    -- Step 0: Ensure logging table exists with StatusType
+    -- Step 0: Ensure logging table exists
     ----------------------------------------------------------------------------------
     IF OBJECT_ID('dbo.ETLFailedLog', 'U') IS NULL
     BEGIN
@@ -41,7 +24,7 @@ BEGIN
             ServerName NVARCHAR(128),
             Message NVARCHAR(MAX),
             Status NVARCHAR(20),
-            StatusType NVARCHAR(20), -- New column to track source
+            StatusType NVARCHAR(20), -- Baseline
             EventDate DATETIME DEFAULT GETDATE(),
             RunID UNIQUEIDENTIFIER,
             LoggedOn DATETIME DEFAULT GETDATE()
@@ -90,7 +73,7 @@ BEGIN
       AND T.IsActive = 1;
 
     ----------------------------------------------------------------------------------
-    -- Step 3: Log ALL Clients (Success / Failed / Null) for this run
+    -- Step 3: Log ALL Clients (once per run)
     ----------------------------------------------------------------------------------
     DECLARE @RunID UNIQUEIDENTIFIER = NEWID();
 
@@ -99,7 +82,7 @@ BEGIN
     SELECT 
         ClientCode, DatabaseName, JobName, ServerName, Message,
         ISNULL(Status, 'Null') AS Status,
-        'Baseline' AS StatusType, -- Mark baseline row
+        'Baseline' AS StatusType,
         ISNULL(EventDate, GETDATE()),
         @RunID
     FROM dbo.ETLClientInfo
@@ -129,64 +112,43 @@ BEGIN
 
     END TRY
     BEGIN CATCH
-        INSERT INTO dbo.ETLFailedLog 
-            (ClientCode, DatabaseName, JobName, ServerName, Message, Status, StatusType, EventDate, RunID, LoggedOn)
-        VALUES (
-            NULL, -- no specific client for init
-            ''' + REPLACE(DatabaseName, '''', '''''') + N''', 
-            NULL, 
-            ''' + REPLACE(ServerName, '''', '''''') + N''', 
-            ERROR_MESSAGE(),
-            ''Failed-Init'',
-            ''FailedInit'',
-            GETDATE(),
-            @RunID,
-            GETDATE()
-        );
+        -- No logging here
     END CATCH
 ', CHAR(13)+CHAR(10))
-    FROM (SELECT DISTINCT DatabaseName, ServerName FROM dbo.ETLClientInfo WHERE Status = 'Failed' AND IsActive = 1) X;
+    FROM (SELECT DISTINCT DatabaseName FROM dbo.ETLClientInfo WHERE IsActive = 1) X;
 
     IF @InitSQL IS NOT NULL
         EXEC sp_executesql @InitSQL;
 
     ----------------------------------------------------------------------------------
-    -- Step 4b: Per Client Execution (always run for each failed client)
+    -- Step 4b: Per Client Execution (only for failed/null clients)
     ----------------------------------------------------------------------------------
     DECLARE @ClientSQL NVARCHAR(MAX) = N'';
 
     SELECT @ClientSQL = STRING_AGG(
     N'
     BEGIN TRY
-        USE ' + QUOTENAME(DatabaseName) + N';
+        USE ' + QUOTENAME(C.DatabaseName) + N';
 
         EXEC [dbo].[BI_spETLConfigurationInsert] 
-            @clientid    = ''' + REPLACE(ClientCode, '''', '''''') + ''',
-            @FtpPassword = ''' + REPLACE(ISNULL(Pwd, ''), '''', '''''') + '''; 
+            @clientid    = ''' + REPLACE(C.ClientCode, '''', '''''') + ''',
+            @FtpPassword = ''' + REPLACE(ISNULL(C.Pwd, ''), '''', '''''') + '''; 
 
         USE msdb;
-        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(JobName, '''') + N';
+        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(C.JobName, '''') + N';
 
     END TRY
     BEGIN CATCH
-        INSERT INTO dbo.ETLFailedLog 
-            (ClientCode, DatabaseName, JobName, ServerName, Message, Status, StatusType, EventDate, RunID, LoggedOn)
-        VALUES (
-            ''' + REPLACE(ClientCode, '''', '''''') + N''', 
-            ''' + REPLACE(DatabaseName, '''', '''''') + N''', 
-            ''' + REPLACE(JobName, '''', '''''') + N''', 
-            ''' + REPLACE(ServerName, '''', '''''') + N''', 
-            ERROR_MESSAGE(),
-            ''Failed-Client'',
-            ''FailedClient'',
-            GETDATE(),
-            @RunID,
-            GETDATE()
-        );
+        -- No logging here
     END CATCH
 ', CHAR(13)+CHAR(10))
-    FROM dbo.ETLClientInfo
-    WHERE Status = 'Failed' AND IsActive = 1;
+    FROM dbo.ETLClientInfo C
+    JOIN dbo.ETLFailedLog L
+        ON C.ClientCode = L.ClientCode
+       AND C.DatabaseName = L.DatabaseName
+       AND L.RunID = @RunID
+    WHERE L.Status <> 'Succeeded' -- only failed/null clients
+      AND C.IsActive = 1;
 
     IF @ClientSQL IS NOT NULL
         EXEC sp_executesql @ClientSQL;
