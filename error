@@ -82,17 +82,18 @@ BEGIN
     BEGIN 
         SET @sql = N'
         ;WITH ClientCTE AS (
-            SELECT ConfigurationValue AS ClientCode
+            SELECT DISTINCT ConfigurationValue AS ClientCode
             FROM ['+@DB+'].dbo.ETL_Configuration
             WHERE ConfigurationName = ''ClientID''
         ),
         FtpCTE AS (
-            SELECT ConfigurationValue AS FtpUserName,
-                   m.ftppass
+            SELECT DISTINCT ConfigurationValue AS FtpUserName,
+                            m.ftppass
             FROM ['+@DB+'].dbo.ETL_Configuration e
             LEFT JOIN admindba.dbo.mytest m
                 ON m.dbname = '''+@DB+'''
             WHERE e.ConfigurationName = ''ftpUserName''
+              AND m.ftppass IS NOT NULL
         )
         MERGE admindba.dbo.ETLClientInfo AS target
         USING (
@@ -111,7 +112,6 @@ BEGIN
             LEFT JOIN admindba.dbo.Client cl
                 ON cl.IsActive = 1
                 AND LEFT('''+@DB+''', LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
-            WHERE f.ftppass IS NOT NULL  -- <<<<< Only include rows with password
         ) AS source
         ON target.ClientCode = source.ClientCode 
            AND target.DatabaseName = source.DatabaseName
