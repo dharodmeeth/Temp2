@@ -1,3 +1,32 @@
+ --------------------------------------------------------------------
+    -- Step 0: Create ETLClientInfo table if it does not exist
+    --------------------------------------------------------------------
+    IF OBJECT_ID('dbo.ETLClientInfo', 'U') IS NULL
+    BEGIN
+        EXEC('
+        CREATE TABLE [dbo].[ETLClientInfo](
+	          NULL,
+	          NULL,
+	          NULL,
+	          NULL,
+	          NULL,
+	          NULL,
+	          NULL,
+	        [IsActive] [bit] NOT NULL,
+	          NULL,
+	        [Message] [nvarchar](max) NULL,
+	          NULL,
+	          NULL,
+	          NULL
+        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+
+        ALTER TABLE [dbo].[ETLClientInfo] ADD DEFAULT ((1)) FOR [IsActive];
+        ALTER TABLE [dbo].[ETLClientInfo] ADD DEFAULT (SYSUTCDATETIME()) FOR [EventDate];
+        ');
+    END
+
+
+
 
 USE [ADMINDBA]
 GO
