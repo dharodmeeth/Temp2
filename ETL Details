@@ -21,9 +21,6 @@ Created On: 30-Sep-2025
 ===================================================================================================
 */
 
--- Drop procedure if it already exists
-
-
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateETLClientInfo
 AS
 BEGIN
@@ -34,30 +31,23 @@ BEGIN
     -----------------------------
     IF OBJECT_ID('dbo.ETLClientInfo','U') IS NULL
     BEGIN
+        EXEC('
         CREATE TABLE [dbo].[ETLClientInfo](
-	[ClientCode] [varchar](50) NULL,
-	[ClientName] [nvarchar](200) NULL,
-	[DatabaseName] [nvarchar](200) NULL,
-	[ServerName] [nvarchar](200) NULL,
-	[FtpUserName] [nvarchar](150) NULL,
-	[PasswordHash] [varbinary](256) NULL,
-	[EtlVersion] [nvarchar](50) NULL,
-	[IsActive] [bit] NOT NULL,
-	[JobName] [nvarchar](200) NULL,
-	[Message] [nvarchar](max) NULL,
-	[EventDate] [datetime2](0) NULL,
-	[Status] [nvarchar](50) NULL,
-	[Pwd] [nvarchar](200) NULL
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
-
-GO
-
-ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive]
-GO
-
-ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate];
-GO
-
+            [ClientCode]    VARCHAR(50)    NULL,
+            [ClientName]    NVARCHAR(200)  NULL,
+            [DatabaseName]  NVARCHAR(200)  NULL,
+            [ServerName]    NVARCHAR(200)  NULL,
+            [FtpUserName]   NVARCHAR(150)  NULL,
+            [PasswordHash]  VARBINARY(256) NULL,
+            [EtlVersion]    NVARCHAR(50)   NULL,
+            [IsActive]      BIT            NOT NULL DEFAULT ((1)),
+            [JobName]       NVARCHAR(200)  NULL,
+            [Message]       NVARCHAR(MAX)  NULL,
+            [EventDate]     DATETIME2(0)   NULL DEFAULT SYSUTCDATETIME(),
+            [Status]        NVARCHAR(50)   NULL,
+            [Pwd]           NVARCHAR(200)  NULL
+        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+        ');
     END
 
     -----------------------------
@@ -78,12 +68,14 @@ GO
        ORDER BY [name];
 
     -- Recreate staging table
-    IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL DROP TABLE admindba.dbo.mytest;
-    CREATE TABLE admindba.dbo.mytest
-    (
-        dbname VARCHAR(100),
-        ftppass NVARCHAR(256)
-    );
+    IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL
+        TRUNCATE TABLE admindba.dbo.mytest;
+    ELSE
+        CREATE TABLE admindba.dbo.mytest
+        (
+            dbname VARCHAR(100),
+            ftppass NVARCHAR(256)
+        );
 
     OPEN curDB  
     FETCH NEXT FROM curDB INTO @DB  
@@ -91,18 +83,18 @@ GO
     BEGIN 
         IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
         BEGIN 
-            -- Get ftpUserName (checking DB level)
+            -- Get ftpUserName
             SET @sql =N'SELECT @DBLevel=ConfigurationValue 
                          FROM ['+@DB+'].dbo.ETL_Configuration 
-                         WHERE ConfigurationName LIKE ''ftpUserName'''; 
-            EXECUTE sp_executesql @sql, 
+                         WHERE ConfigurationName = ''ftpUserName'''; 
+            EXEC sp_executesql @sql, 
                 N'@DBLevel NVARCHAR(250) OUTPUT', 
                 @DBLevel=@DBLevel OUTPUT;
 
             IF @DBLevel <> 'ftpUserName'
             BEGIN 
                 -- Insert decrypted ftpPassword into staging table
-                SET @sql=N'USE '+@DB+';
+                SET @sql=N'USE ['+@DB+'];
 INSERT INTO admindba.dbo.mytest
 SELECT TOP(1) DB_NAME() AS DBName,
        CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
@@ -146,7 +138,7 @@ WHERE ConfigurationName = ''ftpPassword'';';
 
             IF @DBLevel IS NOT NULL
             BEGIN 
-                -- Merge into ETLClientInfo with ClientName from dbo.Client
+                -- Merge into ETLClientInfo
                 SET @sql=N'
 MERGE admindba.dbo.ETLClientInfo AS target
 USING (
