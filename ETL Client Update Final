@@ -107,7 +107,7 @@ BEGIN
             DROP CERTIFICATE CertificateETLFTP;
         IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
             DROP MASTER KEY;
-        DECLARE @ReturnMessage NVARCHAR(MAX);
+        DECLARE @ReturnMessage NVARCHAR(MAX) = NULL;
         EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
     END TRY
     BEGIN CATCH
@@ -120,7 +120,7 @@ BEGIN
         EXEC sp_executesql @InitSQL;
 
     ----------------------------------------------------------------------------------
-    -- Step 4b: Per client execution using cursor (safe declaration)
+    -- Step 4b: Per client execution using cursor (each failed client)
     ----------------------------------------------------------------------------------
     DECLARE @ClientCode NVARCHAR(50),
             @DatabaseName SYSNAME,
@@ -128,6 +128,8 @@ BEGIN
             @Pwd NVARCHAR(MAX),
             @SQL NVARCHAR(MAX),
             @ReturnMessage NVARCHAR(MAX);
+
+    SET @ReturnMessage = NULL;
 
     DECLARE ClientCursor CURSOR FOR
     SELECT 
@@ -148,11 +150,10 @@ BEGIN
 
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        SET @ReturnMessage = NULL;
-
         SET @SQL = '
         BEGIN TRY
             USE ' + QUOTENAME(@DatabaseName) + ';
+            -- Use outer @ReturnMessage, do NOT declare inside dynamic SQL
             EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
 
             EXEC [dbo].[BI_spETLConfigurationInsert]
