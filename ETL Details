@@ -1,3 +1,42 @@
+USE [ADMINDBA]
+GO
+
+/****** Object:  Table [dbo].[ETLClientInfo]    Script Date: 9/30/2025 4:03:37 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[ETLClientInfo](
+	[ClientCode] [varchar](50) NULL,
+	[ClientName] [nvarchar](200) NULL,
+	[DatabaseName] [nvarchar](200) NULL,
+	[ServerName] [nvarchar](200) NULL,
+	[FtpUserName] [nvarchar](150) NULL,
+	[PasswordHash] [varbinary](256) NULL,
+	[EtlVersion] [nvarchar](50) NULL,
+	[IsActive] [bit] NOT NULL,
+	[JobName] [nvarchar](200) NULL,
+	[Message] [nvarchar](max) NULL,
+	[EventDate] [datetime2](0) NULL,
+	[Status] [nvarchar](50) NULL,
+	[Pwd] [nvarchar](200) NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate]
+GO
+
+
+
+
+
+
 -- Step 1: Collect ftpPassword from all databases into mytest
 DECLARE @sql NVARCHAR(max), @DBLevel NVARCHAR(250)
 DECLARE @DB sysname  
