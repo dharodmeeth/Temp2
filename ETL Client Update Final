@@ -32,6 +32,11 @@ BEGIN
     END
 
     ----------------------------------------------------------------------------------
+    -- Declare @ReturnMessage once for dynamic SQL
+    ----------------------------------------------------------------------------------
+    DECLARE @ReturnMessage NVARCHAR(MAX) = NULL;
+
+    ----------------------------------------------------------------------------------
     -- Step 1: Clear ETLClientInfo columns
     ----------------------------------------------------------------------------------
     UPDATE C
@@ -107,7 +112,6 @@ BEGIN
             DROP CERTIFICATE CertificateETLFTP;
         IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
             DROP MASTER KEY;
-        DECLARE @ReturnMessage NVARCHAR(MAX) = NULL;
         EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
     END TRY
     BEGIN CATCH
@@ -117,19 +121,16 @@ BEGIN
     FROM (SELECT DISTINCT C.DatabaseName FROM dbo.ETLClientInfo C WHERE C.IsActive = 1) X;
 
     IF @InitSQL IS NOT NULL
-        EXEC sp_executesql @InitSQL;
+        EXEC sp_executesql @InitSQL, N'@ReturnMessage NVARCHAR(MAX) OUTPUT', @ReturnMessage=@ReturnMessage OUTPUT;
 
     ----------------------------------------------------------------------------------
-    -- Step 4b: Per client execution using cursor (each failed client)
+    -- Step 4b: Per client execution using cursor (failed/null clients)
     ----------------------------------------------------------------------------------
     DECLARE @ClientCode NVARCHAR(50),
             @DatabaseName SYSNAME,
             @JobName NVARCHAR(128),
             @Pwd NVARCHAR(MAX),
-            @SQL NVARCHAR(MAX),
-            @ReturnMessage NVARCHAR(MAX);
-
-    SET @ReturnMessage = NULL;
+            @SQL NVARCHAR(MAX);
 
     DECLARE ClientCursor CURSOR FOR
     SELECT 
@@ -153,7 +154,6 @@ BEGIN
         SET @SQL = '
         BEGIN TRY
             USE ' + QUOTENAME(@DatabaseName) + ';
-            -- Use outer @ReturnMessage, do NOT declare inside dynamic SQL
             EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
 
             EXEC [dbo].[BI_spETLConfigurationInsert]
