@@ -1,6 +1,6 @@
-Msg 209, Level 16, State 1, Procedure ETLClientUpdate, Line 134 [Batch Start Line 7]
-Ambiguous column name 'ClientCode'.
-Msg 209, Level 16, State 1, Procedure ETLClientUpdate, Line 134 [Batch Start Line 7]
-Ambiguous column name 'DatabaseName'.
-Msg 209, Level 16, State 1, Procedure ETLClientUpdate, Line 134 [Batch Start Line 7]
-Ambiguous column name 'JobName'.
+Msg 134, Level 15, State 1, Line 25
+The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
+Msg 134, Level 15, State 1, Line 39
+The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
+
+(1 row(s) affected)
