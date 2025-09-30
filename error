@@ -1,5 +1,5 @@
--- Step 2: Merge data into ETLClientInfo allowing multiple FTP per client/database
-DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
+-- Step 2: Merge multiple ClientCodes per DB
+DECLARE curDB2 CURSOR FOR  
    SELECT [name]   
    FROM master..sysdatabases 
    WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
@@ -14,88 +14,68 @@ WHILE @@FETCH_STATUS = 0
 BEGIN
     IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
-        -- Get dbLevel
-        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
-                     FROM ['+@DB+'].dbo.ETL_Configuration 
-                     WHERE ConfigurationName = ''dbLevel'';';
-        EXEC sp_executesql @sql,
-            N'@DBLevel NVARCHAR(250) OUTPUT',
-            @DBLevel=@DBLevel OUTPUT;
+        DECLARE @ClientCode NVARCHAR(50);
 
-        IF @DBLevel IS NOT NULL
-        BEGIN 
-            -- Merge allowing multiple FTP accounts per client/database
-            SET @sql=N'
+        DECLARE curClient CURSOR FOR
+        SELECT ConfigurationValue
+        FROM ['+@DB+'].dbo.ETL_Configuration
+        WHERE ConfigurationName = 'ClientID';
+
+        OPEN curClient
+        FETCH NEXT FROM curClient INTO @ClientCode
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            -- Merge each ClientCode individually
+            SET @sql = N'
             MERGE admindba.dbo.ETLClientInfo AS target
             USING (
-                SELECT *
-                FROM (
-                    SELECT
-                        (SELECT TOP 1 ConfigurationValue 
-                         FROM ['+@DB+'].dbo.ETL_Configuration 
-                         WHERE ConfigurationName = ''ClientID'') AS ClientCode,
-
-                        (SELECT TOP 1 ConfigurationValue 
-                         FROM ['+@DB+'].dbo.ETL_Configuration 
-                         WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
-
-                        (SELECT TOP 1 ftppass 
-                         FROM admindba.dbo.mytest 
-                         WHERE dbname = '''+@DB+''') AS pwd,
-
-                        (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
-                         FROM admindba.dbo.mytest 
-                         WHERE dbname = '''+@DB+''') AS PasswordHash,
-
-                        '''+@DBLevel+''' AS EtlVersion,
-
-                        '''+@DB+''' AS DatabaseName,
-                        CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-
-                        (SELECT c.ClientName
-                         FROM admindba.dbo.Client c
-                         WHERE c.IsActive = 1
-                           AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
-                        ) AS ClientName,
-
-                        SYSUTCDATETIME() AS EventDate,
-                        1 AS IsActive,
-
-                        -- Unique row key to allow multiple FTP accounts per DB
-                        HASHBYTES(''SHA2_256'', 
-                            CONCAT(
-                                (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ClientID''),
-                                '''+@DB+''',
-                                (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'')
-                            )
-                        ) AS RowHash
-                ) AS src
-                WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND pwd IS NOT NULL
+                SELECT
+                    '''+@ClientCode+''' AS ClientCode,
+                    (SELECT TOP 1 ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+                    (SELECT TOP 1 ftppass 
+                     FROM admindba.dbo.mytest 
+                     WHERE dbname = '''+@DB+''') AS pwd,
+                    (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
+                     FROM admindba.dbo.mytest 
+                     WHERE dbname = '''+@DB+''') AS PasswordHash,
+                    '''+@DB+''' AS DatabaseName,
+                    CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
+                    (SELECT c.ClientName
+                     FROM admindba.dbo.Client c
+                     WHERE c.IsActive = 1
+                       AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
+                    ) AS ClientName,
+                    SYSUTCDATETIME() AS EventDate,
+                    1 AS IsActive
             ) AS source
-            ON (target.RowHash = source.RowHash)  -- Use hash to detect exact same source
+            ON (target.ClientCode = source.ClientCode AND target.DatabaseName = source.DatabaseName)
             WHEN MATCHED THEN
                 UPDATE SET 
                     target.FtpUserName  = source.FtpUserName,
                     target.pwd          = source.pwd,
                     target.PasswordHash = source.PasswordHash,
-                    target.EtlVersion   = source.EtlVersion,
                     target.ServerName   = source.ServerName,
                     target.ClientName   = source.ClientName,
                     target.EventDate    = source.EventDate,
                     target.IsActive     = source.IsActive
             WHEN NOT MATCHED THEN
-                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive, RowHash)
-                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive, source.RowHash);';
-            
-            PRINT @sql;
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
+
             EXEC (@sql);
+
+            FETCH NEXT FROM curClient INTO @ClientCode
         END
+        CLOSE curClient
+        DEALLOCATE curClient
     END
+
     FETCH NEXT FROM curDB2 INTO @DB
 END
-
 CLOSE curDB2
 DEALLOCATE curDB2;
 
--- Final review of ETLClientInfo
+-- Final review
 SELECT * FROM admindba.dbo.ETLClientInfo;
