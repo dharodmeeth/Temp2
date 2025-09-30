@@ -1,4 +1,4 @@
--- Step 2: Merge data into ETLClientInfo allowing multiple entries per client
+-- Step 2: Merge data into ETLClientInfo allowing multiple FTP per client/database
 DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
    SELECT [name]   
    FROM master..sysdatabases 
@@ -24,7 +24,7 @@ BEGIN
 
         IF @DBLevel IS NOT NULL
         BEGIN 
-            -- Merge into ETLClientInfo allowing multiple entries
+            -- Merge allowing multiple FTP accounts per client/database
             SET @sql=N'
             MERGE admindba.dbo.ETLClientInfo AS target
             USING (
@@ -59,11 +59,20 @@ BEGIN
                         ) AS ClientName,
 
                         SYSUTCDATETIME() AS EventDate,
-                        1 AS IsActive
+                        1 AS IsActive,
+
+                        -- Unique row key to allow multiple FTP accounts per DB
+                        HASHBYTES(''SHA2_256'', 
+                            CONCAT(
+                                (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ClientID''),
+                                '''+@DB+''',
+                                (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'')
+                            )
+                        ) AS RowHash
                 ) AS src
                 WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND pwd IS NOT NULL
             ) AS source
-            ON (target.ClientCode = source.ClientCode AND target.DatabaseName = source.DatabaseName)
+            ON (target.RowHash = source.RowHash)  -- Use hash to detect exact same source
             WHEN MATCHED THEN
                 UPDATE SET 
                     target.FtpUserName  = source.FtpUserName,
@@ -75,8 +84,8 @@ BEGIN
                     target.EventDate    = source.EventDate,
                     target.IsActive     = source.IsActive
             WHEN NOT MATCHED THEN
-                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
-                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive, RowHash)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive, source.RowHash);';
             
             PRINT @sql;
             EXEC (@sql);
