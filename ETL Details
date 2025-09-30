@@ -1,0 +1,156 @@
+-- Step 1: Collect ftpPassword from all databases into mytest
+DECLARE @sql NVARCHAR(max), @DBLevel NVARCHAR(250)
+DECLARE @DB sysname  
+
+DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM MSDB.sys.databases 
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND name NOT LIKE '%SP'
+     AND name NOT LIKE '%snapshot%'
+     AND name NOT LIKE '%stg'
+	 AND name NOT LIKE '%_old'
+	 AND state_desc NOT LIKE '%RESTORING%'
+   ORDER BY [name];
+
+-- Recreate staging table
+IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL DROP TABLE admindba.dbo.mytest;
+CREATE TABLE admindba.dbo.mytest
+(
+    dbname VARCHAR(100),
+    ftppass NVARCHAR(256)
+);
+
+OPEN curDB  
+FETCH NEXT FROM curDB INTO @DB  
+WHILE @@FETCH_STATUS = 0  
+BEGIN 
+    IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+    BEGIN 
+        -- Get ftpUserName (checking DB level)
+        SET @sql =N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName LIKE ''ftpUserName'''; 
+        EXECUTE sp_executesql @sql, 
+            N'@DBLevel NVARCHAR(250) OUTPUT', 
+            @DBLevel=@DBLevel OUTPUT;
+
+        IF @DBLevel <> 'ftpUserName'
+        BEGIN 
+            -- Insert decrypted ftpPassword into staging table
+            SET @sql=N'USE '+@DB+';
+INSERT INTO admindba.dbo.mytest
+SELECT TOP(1) DB_NAME() AS DBName,
+       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
+FROM dbo.ETL_Configuration 
+WHERE ConfigurationName = ''ftpPassword'';';
+            
+            PRINT @sql;
+            EXEC (@sql);
+        END
+    END 
+    FETCH NEXT FROM curDB INTO @DB  
+END  
+
+CLOSE curDB  
+DEALLOCATE curDB;
+
+-- Optional: review staging table
+SELECT * FROM admindba.dbo.mytest;
+
+-- Step 2: Merge data into ETLClientInfo with ClientName directly from dbo.Client
+DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM master..sysdatabases 
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND name NOT LIKE '%SP'
+     AND name NOT LIKE '%snapshot%'
+     AND name NOT LIKE '%stg'
+   ORDER BY [name];
+
+OPEN curDB2  
+FETCH NEXT FROM curDB2 INTO @DB  
+WHILE @@FETCH_STATUS = 0  
+BEGIN
+    IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+    BEGIN 
+        -- Get dbLevel
+        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName = ''dbLevel'';';
+        EXEC sp_executesql @sql,
+            N'@DBLevel NVARCHAR(250) OUTPUT',
+            @DBLevel=@DBLevel OUTPUT;
+
+        IF @DBLevel IS NOT NULL
+        BEGIN 
+            -- Merge into ETLClientInfo with ClientName from dbo.Client
+            SET @sql=N'
+            MERGE admindba.dbo.ETLClientInfo AS target
+            USING (
+                SELECT *
+                FROM (
+                    SELECT
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+
+                        (SELECT TOP 1 ftppass 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS pwd,
+
+                        (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS PasswordHash,
+
+                        '''+@DBLevel+''' AS EtlVersion,
+
+                        '''+@DB+''' AS DatabaseName,
+                        CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
+
+                        -- Get ClientName from dbo.Client using prefix match
+                        (SELECT c.ClientName
+                         FROM admindba.dbo.Client c
+                         WHERE c.IsActive = 1
+                           AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
+                        ) AS ClientName,
+
+                        SYSUTCDATETIME() AS EventDate,
+                        1 AS IsActive
+                ) AS src
+                WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND pwd IS NOT NULL
+            ) AS source
+            ON (target.ClientCode = source.ClientCode)
+            WHEN MATCHED THEN
+                UPDATE SET 
+                    target.FtpUserName  = source.FtpUserName,
+                    target.pwd          = source.pwd,
+                    target.PasswordHash = source.PasswordHash,
+                    target.EtlVersion   = source.EtlVersion,
+                    target.DatabaseName = source.DatabaseName,
+                    target.ServerName   = source.ServerName,
+                    target.ClientName   = source.ClientName,
+                    target.EventDate    = source.EventDate,
+                    target.IsActive     = source.IsActive
+            WHEN NOT MATCHED THEN
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
+            
+            PRINT @sql;
+            EXEC (@sql);
+        END
+    END
+    FETCH NEXT FROM curDB2 INTO @DB
+END
+
+CLOSE curDB2
+DEALLOCATE curDB2;
+
+-- Final review of ETLClientInfo
+SELECT * FROM admindba.dbo.ETLClientInfo;
+
+--Truncate Table admindba.dbo.ETLClientInfo
