@@ -6,21 +6,6 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-/********************************************************************************
--- Procedure Name : dbo.ETLClientUpdate
--- Description    : Performs ETL client updates:
---                  1. Clears previous columns in ETLClientInfo.
---                  2. Updates last run info per job.
---                  3. Logs all active clients (baseline logging).
---                  4a. Initializes each database once (keys/certificates).
---                  4b. Executes ETL config & jobs per failed/null client.
---                  5. Sends HTML email for failed/null clients.
---                  6. Cleans up old log data (>10 days).
--- Owner          : Meeth Dharod
--- Created On     : 2025-09-05
--- Modified On    : 2025-09-30 (cursor fix for Step 4b)
-********************************************************************************/
-
 CREATE OR ALTER PROCEDURE [dbo].[ETLClientUpdate]
 AS
 BEGIN
@@ -102,7 +87,7 @@ BEGIN
     WHERE IsActive = 1;
 
     ----------------------------------------------------------------------------------
-    -- Step 4a: One-time database initialization
+    -- Step 4a: One-time database initialization per database
     ----------------------------------------------------------------------------------
     DECLARE @InitSQL NVARCHAR(MAX) = N'';
 
@@ -128,8 +113,15 @@ BEGIN
         EXEC sp_executesql @InitSQL;
 
     ----------------------------------------------------------------------------------
-    -- Step 4b: Per client execution using cursor (avoids redeclaration errors)
+    -- Step 4b: Per client execution using cursor (safe declaration)
     ----------------------------------------------------------------------------------
+    DECLARE @ClientCode NVARCHAR(50),
+            @DatabaseName SYSNAME,
+            @JobName NVARCHAR(128),
+            @Pwd NVARCHAR(MAX),
+            @SQL NVARCHAR(MAX),
+            @ReturnMessage NVARCHAR(MAX);
+
     DECLARE ClientCursor CURSOR FOR
     SELECT ClientCode, DatabaseName, JobName, ISNULL(Pwd,'') AS Pwd
     FROM dbo.ETLClientInfo C
@@ -137,21 +129,20 @@ BEGIN
       ON C.ClientCode = L.ClientCode
      AND C.DatabaseName = L.DatabaseName
      AND L.RunID = @RunID
-    WHERE L.Status <> 'Succeeded' -- only failed/null clients
+    WHERE L.Status <> 'Succeeded'
       AND C.IsActive = 1;
-
-    DECLARE @ClientCode NVARCHAR(50), @DatabaseName SYSNAME, @JobName NVARCHAR(128), @Pwd NVARCHAR(MAX);
-    DECLARE @SQL NVARCHAR(MAX);
 
     OPEN ClientCursor;
     FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
 
     WHILE @@FETCH_STATUS = 0
     BEGIN
+        -- Declare @ReturnMessage once per iteration (outside dynamic SQL)
+        SET @ReturnMessage = NULL;
+
         SET @SQL = '
         BEGIN TRY
             USE ' + QUOTENAME(@DatabaseName) + ';
-            DECLARE @ReturnMessage NVARCHAR(MAX);
             EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
 
             EXEC [dbo].[BI_spETLConfigurationInsert]
@@ -165,7 +156,7 @@ BEGIN
             -- Errors already logged in Step 3
         END CATCH';
 
-        EXEC sp_executesql @SQL;
+        EXEC sp_executesql @SQL, N'@ReturnMessage NVARCHAR(MAX) OUTPUT', @ReturnMessage=@ReturnMessage OUTPUT;
 
         FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
     END
