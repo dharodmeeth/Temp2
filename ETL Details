@@ -5,6 +5,21 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
+/*
+===================================================================================================
+Procedure Name: dbo.usp_UpdateETLClientInfo
+Description:
+1. Collects ETL client information from all active user databases.
+2. Decrypts and stages FTP passwords in a permanent staging table.
+3. Updates existing clients or inserts new clients into ETLClientInfo.
+4. Creates ETLClientInfo table if it does not exist.
+5. Clears staging table at start and end; safe to run multiple times daily.
+
+Owner: Meeth Dharod
+Created On: 30-Sep-2025
+===================================================================================================
+*/
+
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateETLClientInfo
 AS
 BEGIN
@@ -15,7 +30,7 @@ BEGIN
     DECLARE @DBLevel NVARCHAR(250);
 
     -----------------------------
-    -- Step 1: Create ETLClientInfo if not exists
+    -- Step 0: Create ETLClientInfo if not exists
     -----------------------------
     IF OBJECT_ID('dbo.ETLClientInfo','U') IS NULL
     BEGIN
@@ -37,7 +52,18 @@ BEGIN
     END
 
     -----------------------------
-    -- Step 2: Truncate staging table
+    -- Step 1: Create permanent staging table if not exists
+    -----------------------------
+    IF OBJECT_ID('admindba.dbo.ETLTempTable','U') IS NULL
+    BEGIN
+        CREATE TABLE admindba.dbo.ETLTempTable (
+            dbname  VARCHAR(100),
+            ftppass NVARCHAR(256)
+        );
+    END
+
+    -----------------------------
+    -- Step 2: Clear staging table at start
     -----------------------------
     TRUNCATE TABLE admindba.dbo.ETLTempTable;
 
@@ -145,6 +171,11 @@ BEGIN
     END
     CLOSE curDB2;
     DEALLOCATE curDB2;
+
+    -----------------------------
+    -- Step 5: Clear staging table at the end
+    -----------------------------
+    TRUNCATE TABLE admindba.dbo.ETLTempTable;
 
 END
 GO
