@@ -1,34 +1,5 @@
---------------------------------------------------------------------
--- STEP 0: Create / Clean staging table
---------------------------------------------------------------------
-IF OBJECT_ID('admindba.dbo.ETLTempTable','U') IS NOT NULL DROP TABLE admindba.dbo.ETLTempTable;
-CREATE TABLE admindba.dbo.ETLTempTable
-(
-    DatabaseName VARCHAR(100),
-    ClientCode   NVARCHAR(200),
-    FtpUserName  NVARCHAR(200),
-    ftppass      NVARCHAR(256)
-);
 
---------------------------------------------------------------------
--- STEP 1: Populate staging table from all databases
---------------------------------------------------------------------
-DECLARE @DB sysname, @sql NVARCHAR(MAX);
-
-DECLARE curDB CURSOR FOR
-SELECT [name]
-FROM sys.databases
-WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
-  AND state_desc = 'ONLINE';
-
-OPEN curDB
-FETCH NEXT FROM curDB INTO @DB
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL
-    BEGIN
-        SET @sql = '
-        USE '+QUOTENAME(@DB)+';
+        USE [SWLPRD];
 
         -- Open the certificate if needed
         OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
@@ -38,69 +9,2203 @@ BEGIN
             DB_NAME() AS DatabaseName,
             sc.ConfigurationValue AS ClientCode,
             un.ConfigurationValue AS FtpUserName,
-            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, pw.ConfigurationEncrypted)) AS ftppass
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
         FROM dbo.ETL_Configuration sc
         INNER JOIN dbo.ETL_Configuration pw
-            ON pw.ConfigurationName = ''ftpPassword''
+            ON pw.ConfigurationName = 'ftpPassword'
         INNER JOIN dbo.ETL_Configuration un
-            ON un.ConfigurationName = ''ftpUserName''
-        WHERE sc.ConfigurationName IN (''SourceCode'',''ClientID'')
-          AND pw.ConfigurationEncrypted IS NOT NULL;';
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
 
-        PRINT @sql;  -- debug: see generated SQL
-        EXEC(@sql);
-    END
+        USE [DEMO75SP];
 
-    FETCH NEXT FROM curDB INTO @DB
-END
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
 
-CLOSE curDB
-DEALLOCATE curDB;
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
 
--- Optional: check staging table
--- SELECT * FROM admindba.dbo.ETLTempTable ORDER BY DatabaseName, ClientCode;
+        USE [VERIFYLIVESPPRD];
 
---------------------------------------------------------------------
--- STEP 2: Merge staging table into ETLClientInfo
---------------------------------------------------------------------
-MERGE admindba.dbo.ETLClientInfo AS target
-USING (
-    SELECT 
-        m.DatabaseName,
-        m.ClientCode,
-        m.FtpUserName,
-        m.ftppass AS pwd,
-        CONVERT(VARBINARY(256), m.ftppass) AS PasswordHash,
-        CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(200)) AS ServerName,
-        cl.ClientName,
-        SYSUTCDATETIME() AS EventDate,
-        1 AS IsActive
-    FROM admindba.dbo.ETLTempTable m
-    LEFT JOIN admindba.dbo.Client cl
-        ON cl.IsActive = 1
-       AND LEFT(m.DatabaseName, LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
-    WHERE m.ftppass IS NOT NULL
-) AS source
-ON target.ClientCode = source.ClientCode
-   AND target.DatabaseName = source.DatabaseName
-   AND target.FtpUserName = source.FtpUserName
-WHEN MATCHED THEN
-    UPDATE SET
-        target.pwd          = source.pwd,
-        target.PasswordHash = source.PasswordHash,
-        target.ServerName   = source.ServerName,
-        target.ClientName   = source.ClientName,
-        target.EventDate    = source.EventDate,
-        target.IsActive     = source.IsActive
-WHEN NOT MATCHED THEN
-    INSERT (ClientCode, FtpUserName, pwd, PasswordHash, DatabaseName, ServerName, ClientName, EventDate, IsActive)
-    VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
 
---------------------------------------------------------------------
--- STEP 3: Optional cleanup / final review
---------------------------------------------------------------------
-TRUNCATE TABLE admindba.dbo.ETLTempTable;
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
 
-SELECT * 
-FROM admindba.dbo.ETLClientInfo
-ORDER BY DatabaseName, ClientCode;
+        USE [TrainFN1LIVEPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [Verify75SPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CPPIBPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [TRVPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [QUADCPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AIPTPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PFGPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PCSTestingdemoUSPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [GEMPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [IVMLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CitiPEEFLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [DVSMLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [MGSAPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FWLLCPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [KSUPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [GCAPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [IVMCPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [MGSAPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CCYPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [TRVPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CYPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ABRYPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AIPTPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CCYPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [GLCPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [DCAPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [TrainFN1LIVEPSPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LEPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [OIPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [OVINVPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PGPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PRCAPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CYPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [KTCOPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [SCPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [SIHPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LINPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [MHGLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AONPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [WDMLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FWLLCPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [IVMCPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [RWCompareLivePRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CPPIBPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ARMPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [RECPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [OVINVPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [SIHPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [KTCOPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ABRYPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [RCPTPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [OIPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [GCAPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LSVPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CMLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FVPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [DCAMPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AFPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BCEPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PEAKPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [QUADCPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [WLDENTPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AMCPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [DCAPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ARGOPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ARMPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AMCPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BIPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BRHPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BSCPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CitiCoreLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CitiICGLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CitiPEEFLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [ivmlprdSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [SWLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [FVPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AFPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LOFTUSPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [NSVMPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BRPLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LEPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [SCPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LSVPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CMLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [RCPTPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PEAKPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [CADFPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BRPLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [JPMPPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [DCAMPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [YPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BRHPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [AONPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [LINPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [PFGPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [RECPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [MHGLPRD];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [BIPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [MFLPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+        USE [GLCPPRDSP];
+
+        -- Open the certificate if needed
+        OPEN MASTER KEY DECRYPTION BY CERTIFICATE CertificateETLFTP;
+
+        INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, FtpUserName, ftppass)
+        SELECT 
+            DB_NAME() AS DatabaseName,
+            sc.ConfigurationValue AS ClientCode,
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID('CertificateETLFTP'), NULL, pw.ConfigurationEncrypted)) AS ftppass
+        FROM dbo.ETL_Configuration sc
+        INNER JOIN dbo.ETL_Configuration pw
+            ON pw.ConfigurationName = 'ftpPassword'
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = 'ftpUserName'
+        WHERE sc.ConfigurationName IN ('SourceCode','ClientID')
+          AND pw.ConfigurationEncrypted IS NOT NULL;
+Msg 102, Level 15, State 1, Line 5
+Incorrect syntax near 'CertificateETLFTP'.
+
+(0 rows affected)
+
+(0 rows affected)
+
+Completion time: 2025-09-30T19:34:55.8650169-04:00
