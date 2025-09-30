@@ -1,9 +1,8 @@
-USE [ADMINDBA]
+USE [ADMINDBA];
 GO
-
-SET ANSI_NULLS ON
+SET ANSI_NULLS ON;
 GO
-SET QUOTED_IDENTIFIER ON
+SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateETLClientInfo
@@ -11,51 +10,39 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @DB sysname, @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250);
+    DECLARE @DB sysname;
+    DECLARE @sql NVARCHAR(MAX);
+    DECLARE @DBLevel NVARCHAR(250);
 
     -----------------------------
-    -- Step 0: Create ETLClientInfo if not exists
+    -- Step 1: Create ETLClientInfo if not exists
     -----------------------------
     IF OBJECT_ID('dbo.ETLClientInfo','U') IS NULL
     BEGIN
-        EXEC('
-            CREATE TABLE dbo.ETLClientInfo(
-                ClientCode    VARCHAR(50) NULL,
-                ClientName    NVARCHAR(200) NULL,
-                DatabaseName  NVARCHAR(200) NULL,
-                ServerName    NVARCHAR(200) NULL,
-                FtpUserName   NVARCHAR(150) NULL,
-                PasswordHash  VARBINARY(256) NULL,
-                EtlVersion    NVARCHAR(50) NULL,
-                IsActive      BIT NOT NULL DEFAULT ((1)),
-                JobName       NVARCHAR(200) NULL,
-                Message       NVARCHAR(MAX) NULL,
-                EventDate     DATETIME2(0) NULL DEFAULT SYSUTCDATETIME(),
-                Status        NVARCHAR(50) NULL,
-                Pwd           NVARCHAR(200) NULL
-            )
-        ');
+        CREATE TABLE dbo.ETLClientInfo(
+            ClientCode    VARCHAR(50) NULL,
+            ClientName    NVARCHAR(200) NULL,
+            DatabaseName  NVARCHAR(200) NULL,
+            ServerName    NVARCHAR(200) NULL,
+            FtpUserName   NVARCHAR(150) NULL,
+            PasswordHash  VARBINARY(256) NULL,
+            EtlVersion    NVARCHAR(50) NULL,
+            IsActive      BIT NOT NULL DEFAULT ((1)),
+            JobName       NVARCHAR(200) NULL,
+            Message       NVARCHAR(MAX) NULL,
+            EventDate     DATETIME2(0) NULL DEFAULT SYSUTCDATETIME(),
+            Status        NVARCHAR(50) NULL,
+            Pwd           NVARCHAR(200) NULL
+        );
     END
 
     -----------------------------
-    -- Step 1: Create or truncate staging table dynamically
+    -- Step 2: Truncate staging table
     -----------------------------
-    EXEC('
-        IF OBJECT_ID(''admindba.dbo.mytest'',''U'') IS NULL
-        BEGIN
-            CREATE TABLE admindba.dbo.mytest(
-                dbname VARCHAR(100),
-                ftppass NVARCHAR(256)
-            )
-        END
-        ELSE
-        BEGIN
-            TRUNCATE TABLE admindba.dbo.mytest
-        END
-    ');
+    TRUNCATE TABLE admindba.dbo.ETLTempTable;
 
     -----------------------------
-    -- Step 2: Populate staging table with ftp passwords
+    -- Step 3: Populate staging table with FTP passwords
     -----------------------------
     DECLARE curDB CURSOR FOR
         SELECT name
@@ -73,7 +60,7 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         SET @sql = '
-            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'',''U'') IS NOT NULL
+            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'', ''U'') IS NOT NULL
             BEGIN
                 DECLARE @ftp NVARCHAR(256);
                 SELECT TOP 1 @ftp = CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted))
@@ -82,7 +69,7 @@ BEGIN
 
                 IF @ftp IS NOT NULL
                 BEGIN
-                    INSERT INTO admindba.dbo.mytest(dbname, ftppass)
+                    INSERT INTO admindba.dbo.ETLTempTable(dbname, ftppass)
                     VALUES (''' + @DB + ''', @ftp);
                 END
             END
@@ -95,7 +82,7 @@ BEGIN
     DEALLOCATE curDB;
 
     -----------------------------
-    -- Step 3: Merge into ETLClientInfo dynamically
+    -- Step 4: Merge into ETLClientInfo
     -----------------------------
     DECLARE curDB2 CURSOR FOR
         SELECT name
@@ -111,7 +98,7 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         SET @sql = '
-            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'',''U'') IS NOT NULL
+            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'', ''U'') IS NOT NULL
             BEGIN
                 DECLARE @dbLevel NVARCHAR(250);
                 SELECT TOP 1 @dbLevel = ConfigurationValue
@@ -120,31 +107,32 @@ BEGIN
 
                 IF @dbLevel IS NOT NULL
                 BEGIN
-                    MERGE admindba.dbo.ETLClientInfo AS target
+                    MERGE dbo.ETLClientInfo AS target
                     USING (
                         SELECT
                             (SELECT TOP 1 ConfigurationValue FROM [' + @DB + '].dbo.ETL_Configuration WHERE ConfigurationName = ''ClientID'') AS ClientCode,
                             (SELECT TOP 1 ConfigurationValue FROM [' + @DB + '].dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
-                            (SELECT TOP 1 ftppass FROM admindba.dbo.mytest WHERE dbname = ''' + @DB + ''') AS Pwd,
-                            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) FROM admindba.dbo.mytest WHERE dbname = ''' + @DB + ''') AS PasswordHash,
+                            (SELECT TOP 1 ftppass FROM admindba.dbo.ETLTempTable WHERE dbname = ''' + @DB + ''') AS Pwd,
+                            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) FROM admindba.dbo.ETLTempTable WHERE dbname = ''' + @DB + ''') AS PasswordHash,
                             @dbLevel AS EtlVersion,
                             ''' + @DB + ''' AS DatabaseName,
                             CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-                            (SELECT c.ClientName FROM admindba.dbo.Client c WHERE c.IsActive = 1 AND LEFT(''' + @DB + ''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix) AS ClientName,
+                            (SELECT c.ClientName FROM dbo.Client c WHERE c.IsActive = 1 AND LEFT(''' + @DB + ''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix) AS ClientName,
                             SYSUTCDATETIME() AS EventDate,
                             1 AS IsActive
                     ) AS source
-                    ON (target.ClientCode = source.ClientCode)
-                    WHEN MATCHED THEN UPDATE SET
-                        target.FtpUserName = source.FtpUserName,
-                        target.Pwd = source.Pwd,
-                        target.PasswordHash = source.PasswordHash,
-                        target.EtlVersion = source.EtlVersion,
-                        target.DatabaseName = source.DatabaseName,
-                        target.ServerName = source.ServerName,
-                        target.ClientName = source.ClientName,
-                        target.EventDate = source.EventDate,
-                        target.IsActive = source.IsActive
+                    ON target.ClientCode = source.ClientCode
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            target.FtpUserName = source.FtpUserName,
+                            target.Pwd = source.Pwd,
+                            target.PasswordHash = source.PasswordHash,
+                            target.EtlVersion = source.EtlVersion,
+                            target.DatabaseName = source.DatabaseName,
+                            target.ServerName = source.ServerName,
+                            target.ClientName = source.ClientName,
+                            target.EventDate = source.EventDate,
+                            target.IsActive = source.IsActive
                     WHEN NOT MATCHED THEN
                         INSERT (ClientCode, FtpUserName, Pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
                         VALUES (source.ClientCode, source.FtpUserName, source.Pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
