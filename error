@@ -1,51 +1,53 @@
- DECLARE @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250);
-    DECLARE @DB sysname;
+DECLARE @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250);
+DECLARE @DB sysname;
 
-    DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
-       SELECT [name]   
-       FROM MSDB.sys.databases 
-       WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
-         AND name NOT LIKE '%SP'
-         AND name NOT LIKE '%snapshot%'
-         AND name NOT LIKE '%stg'
-         AND name NOT LIKE '%_old'
-         AND state_desc NOT LIKE '%RESTORING%'
-       ORDER BY [name];
+DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM sys.databases  -- Use sys.databases instead of MSDB.sys.databases
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND [name] NOT LIKE '%SP'
+     AND [name] NOT LIKE '%snapshot%'
+     AND [name] NOT LIKE '%stg'
+     AND [name] NOT LIKE '%_old'
+     AND state_desc NOT LIKE '%RESTORING%'
+   ORDER BY [name];
 
-    OPEN curDB  
-    FETCH NEXT FROM curDB INTO @DB  
+OPEN curDB  
+FETCH NEXT FROM curDB INTO @DB  
 
-    WHILE @@FETCH_STATUS = 0  
+WHILE @@FETCH_STATUS = 0  
+BEGIN 
+    IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
-        IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+        -- Check if ftpUserName exists for this DB
+        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName LIKE ''ftpUserName'''; 
+
+        EXECUTE sp_executesql @sql, 
+            N'@DBLevel NVARCHAR(250) OUTPUT', 
+            @DBLevel=@DBLevel OUTPUT;
+
+        IF @DBLevel <> 'ftpUserName'
         BEGIN 
-            -- Get ftpUserName (checking DB level)
-            SET @sql = N'SELECT @DBLevel=ConfigurationValue 
-                         FROM ['+@DB+'].dbo.ETL_Configuration 
-                         WHERE ConfigurationName LIKE ''ftpUserName'''; 
-            EXECUTE sp_executesql @sql, 
-                N'@DBLevel NVARCHAR(250) OUTPUT', 
-                @DBLevel=@DBLevel OUTPUT;
+            -- Only attempt decrypt if column exists
+            IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
+            BEGIN
+                -- Insert all decrypted ftpPasswords (for all ClientIDs) into permanent staging table
+                SET @sql = N'
+                INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ftppass)
+                SELECT DB_NAME() AS DBName,
+                       ClientID,
+                       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
+                FROM [' + @DB + '].dbo.ETL_Configuration
+                WHERE ConfigurationName = ''ftpPassword'';';
 
-            IF @DBLevel <> 'ftpUserName'
-            BEGIN 
-                -- Only attempt decrypt if column exists
-                IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
-                BEGIN
-                    -- Insert decrypted ftpPassword into permanent staging table
-                    SET @sql=N'USE '+@DB+';
-    INSERT INTO admindba.dbo.ETLTempTable
-    SELECT TOP(1) DB_NAME() AS DBName,
-           CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
-    FROM dbo.ETL_Configuration 
-    WHERE ConfigurationName = ''ftpPassword'';';
-                    
-                    EXEC (@sql);
-                END
+                EXEC (@sql);
             END
-        END 
-        FETCH NEXT FROM curDB INTO @DB  
-    END  
+        END
+    END 
+    FETCH NEXT FROM curDB INTO @DB  
+END  
 
-    CLOSE curDB  
-    DEALLOCATE curDB;
+CLOSE curDB  
+DEALLOCATE curDB;
