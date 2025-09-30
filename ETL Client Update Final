@@ -6,6 +6,21 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
+/********************************************************************************
+-- Procedure Name : dbo.ETLClientUpdate
+-- Description    : Performs ETL client updates:
+--                  1. Clears previous columns in ETLClientInfo.
+--                  2. Updates last run info per job.
+--                  3. Logs all active clients (baseline logging).
+--                  4a. Initializes each database once (keys/certificates).
+--                  4b. Executes ETL config & jobs per failed/null client.
+--                  5. Sends HTML email for failed/null clients.
+--                  6. Cleans up old log data (>10 days).
+-- Owner          : Meeth Dharod
+-- Created On     : 2025-09-05
+-- Modified On    : 2025-09-30 (cursor fix for Step 4b)
+********************************************************************************/
+
 CREATE OR ALTER PROCEDURE [dbo].[ETLClientUpdate]
 AS
 BEGIN
@@ -24,7 +39,7 @@ BEGIN
             ServerName NVARCHAR(128),
             Message NVARCHAR(MAX),
             Status NVARCHAR(20),
-            StatusType NVARCHAR(20), -- Baseline
+            StatusType NVARCHAR(50),
             EventDate DATETIME DEFAULT GETDATE(),
             RunID UNIQUEIDENTIFIER,
             LoggedOn DATETIME DEFAULT GETDATE()
@@ -32,16 +47,16 @@ BEGIN
     END
 
     ----------------------------------------------------------------------------------
-    -- Step 1: Clear columns in ETLClientInfo
+    -- Step 1: Clear ETLClientInfo columns
     ----------------------------------------------------------------------------------
     UPDATE dbo.ETLClientInfo
-    SET Message   = NULL,
+    SET Message = NULL,
         EventDate = NULL,
-        Status    = NULL,
-        JobName   = NULL;
+        Status = NULL,
+        JobName = NULL;
 
     ----------------------------------------------------------------------------------
-    -- Step 2: Update ETLClientInfo with last run per job
+    -- Step 2: Update ETLClientInfo with last SQL Agent run per job
     ----------------------------------------------------------------------------------
     UPDATE T
     SET 
@@ -57,7 +72,7 @@ BEGIN
                         WHEN SJH.run_status = 1 THEN 'Succeeded'
                         WHEN SJH.run_status = 2 THEN 'Retry'
                         WHEN SJH.run_status = 3 THEN 'Cancelled'
-                        ELSE 'Null'
+                        ELSE 'Unknown'
                       END
     FROM dbo.ETLClientInfo T
     JOIN msdb..sysjobs SJ
@@ -73,88 +88,93 @@ BEGIN
       AND T.IsActive = 1;
 
     ----------------------------------------------------------------------------------
-    -- Step 3: Log ALL Clients (once per run)
+    -- Step 3: Baseline logging of all active clients
     ----------------------------------------------------------------------------------
     DECLARE @RunID UNIQUEIDENTIFIER = NEWID();
 
-    INSERT INTO dbo.ETLFailedLog 
-        (ClientCode, DatabaseName, JobName, ServerName, Message, Status, StatusType, EventDate, RunID)
-    SELECT 
-        ClientCode, DatabaseName, JobName, ServerName, Message,
-        ISNULL(Status, 'Null') AS Status,
-        'Baseline' AS StatusType,
-        ISNULL(EventDate, GETDATE()),
-        @RunID
+    INSERT INTO dbo.ETLFailedLog (ClientCode, DatabaseName, JobName, ServerName, Message, Status, StatusType, EventDate, RunID)
+    SELECT ClientCode, DatabaseName, JobName, ServerName, Message,
+           ISNULL(Status, 'Null') AS Status,
+           'Baseline' AS StatusType,
+           ISNULL(EventDate, GETDATE()),
+           @RunID
     FROM dbo.ETLClientInfo
     WHERE IsActive = 1;
 
     ----------------------------------------------------------------------------------
-    -- Step 4a: One-time Database Initialization (per DatabaseName)
+    -- Step 4a: One-time database initialization
     ----------------------------------------------------------------------------------
     DECLARE @InitSQL NVARCHAR(MAX) = N'';
 
     SELECT @InitSQL = STRING_AGG(
-    N'
-    BEGIN TRY
+    N'BEGIN TRY
         USE ' + QUOTENAME(DatabaseName) + N';
-
         IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
             DROP SYMMETRIC KEY FTPPSWDKey;
-
         IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
             DROP CERTIFICATE CertificateETLFTP;
-
         IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
             DROP MASTER KEY;
-
         DECLARE @ReturnMessage NVARCHAR(MAX);
         EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
-
     END TRY
     BEGIN CATCH
-        -- No logging here
-    END CATCH
-', CHAR(13)+CHAR(10))
+        -- Errors already logged in Step 3
+    END CATCH'
+    , CHAR(13)+CHAR(10))
     FROM (SELECT DISTINCT DatabaseName FROM dbo.ETLClientInfo WHERE IsActive = 1) X;
 
     IF @InitSQL IS NOT NULL
         EXEC sp_executesql @InitSQL;
 
     ----------------------------------------------------------------------------------
-    -- Step 4b: Per Client Execution (only for failed/null clients)
+    -- Step 4b: Per client execution using cursor (avoids redeclaration errors)
     ----------------------------------------------------------------------------------
-    DECLARE @ClientSQL NVARCHAR(MAX) = N'';
-
-    SELECT @ClientSQL = STRING_AGG(
-    N'
-    BEGIN TRY
-        USE ' + QUOTENAME(C.DatabaseName) + N';
-
-        EXEC [dbo].[BI_spETLConfigurationInsert] 
-            @clientid    = ''' + REPLACE(C.ClientCode, '''', '''''') + ''',
-            @FtpPassword = ''' + REPLACE(ISNULL(C.Pwd, ''), '''', '''''') + '''; 
-
-        USE msdb;
-        EXEC msdb.dbo.sp_start_job @job_name = ' + QUOTENAME(C.JobName, '''') + N';
-
-    END TRY
-    BEGIN CATCH
-        -- No logging here
-    END CATCH
-', CHAR(13)+CHAR(10))
+    DECLARE ClientCursor CURSOR FOR
+    SELECT ClientCode, DatabaseName, JobName, ISNULL(Pwd,'') AS Pwd
     FROM dbo.ETLClientInfo C
     JOIN dbo.ETLFailedLog L
-        ON C.ClientCode = L.ClientCode
-       AND C.DatabaseName = L.DatabaseName
-       AND L.RunID = @RunID
+      ON C.ClientCode = L.ClientCode
+     AND C.DatabaseName = L.DatabaseName
+     AND L.RunID = @RunID
     WHERE L.Status <> 'Succeeded' -- only failed/null clients
       AND C.IsActive = 1;
 
-    IF @ClientSQL IS NOT NULL
-        EXEC sp_executesql @ClientSQL;
+    DECLARE @ClientCode NVARCHAR(50), @DatabaseName SYSNAME, @JobName NVARCHAR(128), @Pwd NVARCHAR(MAX);
+    DECLARE @SQL NVARCHAR(MAX);
+
+    OPEN ClientCursor;
+    FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @SQL = '
+        BEGIN TRY
+            USE ' + QUOTENAME(@DatabaseName) + ';
+            DECLARE @ReturnMessage NVARCHAR(MAX);
+            EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
+
+            EXEC [dbo].[BI_spETLConfigurationInsert]
+                @clientid = ''' + @ClientCode + ''',
+                @FtpPassword = ''' + @Pwd + ''';
+
+            USE msdb;
+            EXEC msdb.dbo.sp_start_job @job_name = ''' + @JobName + ''';
+        END TRY
+        BEGIN CATCH
+            -- Errors already logged in Step 3
+        END CATCH';
+
+        EXEC sp_executesql @SQL;
+
+        FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
+    END
+
+    CLOSE ClientCursor;
+    DEALLOCATE ClientCursor;
 
     ----------------------------------------------------------------------------------
-    -- Step 5: Send HTML Email Only for Failed/Null Clients for this run
+    -- Step 5: Send email only for failed/null clients
     ----------------------------------------------------------------------------------
     IF EXISTS (SELECT 1 FROM dbo.ETLFailedLog WHERE RunID = @RunID AND Status <> 'Succeeded')
     BEGIN
@@ -170,7 +190,7 @@ BEGIN
         N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
         N'<tr style="background-color:lightblue;">
 <th>ClientCode</th><th>ServerName</th><th>DatabaseName</th>
-<th>JobName</th><th>Message</th><th>Status</th><th>StatusType</th><th>EventDate</th></tr>' +
+<th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
         (
             SELECT STRING_AGG(
                 N'<tr><td>' + ISNULL(ClientCode, '') + N'</td>' +
@@ -179,7 +199,6 @@ BEGIN
                 N'<td>' + ISNULL(JobName, '') + N'</td>' +
                 N'<td>' + ISNULL(Message, '') + N'</td>' +
                 N'<td>' + ISNULL(Status, '') + N'</td>' +
-                N'<td>' + ISNULL(StatusType, '') + N'</td>' +
                 N'<td>' + ISNULL(CONVERT(VARCHAR(20), EventDate, 120), '') + N'</td></tr>'
             , CHAR(13)+CHAR(10))
             FROM dbo.ETLFailedLog
@@ -187,7 +206,6 @@ BEGIN
         );
 
         SET @body = @body + N'</table>';
-
         SET @subject = N'ETL Execution Report - Failed Clients Only'
                        + CASE WHEN @ServerNames IS NOT NULL THEN N' | Servers: ' + @ServerNames ELSE N'' END;
 
@@ -200,7 +218,7 @@ BEGIN
     END
 
     ----------------------------------------------------------------------------------
-    -- Step 6: Cleanup Old Data (>10 days)
+    -- Step 6: Cleanup old log data (>10 days)
     ----------------------------------------------------------------------------------
     DELETE FROM dbo.ETLFailedLog
     WHERE LoggedOn < DATEADD(DAY, -10, GETDATE());
