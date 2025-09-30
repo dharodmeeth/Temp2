@@ -1,2 +1,6 @@
-Msg 257, Level 16, State 3, Line 2
-Implicit conversion from data type nvarchar to varbinary is not allowed. Use the CONVERT function to run this query.
+Msg 134, Level 15, State 1, Line 37
+The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
+Msg 134, Level 15, State 1, Line 58
+The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
+
+(1 row(s) affected)
