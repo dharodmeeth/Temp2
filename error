@@ -1,222 +1,156 @@
-USE [ADMINDBA]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+-- Step 1: Collect ftpPassword from all databases into mytest
+DECLARE @sql NVARCHAR(max), @DBLevel NVARCHAR(250)
+DECLARE @DB sysname  
 
-CREATE OR ALTER PROCEDURE dbo.ETLClientUpdate
-AS
+DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM MSDB.sys.databases 
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND name NOT LIKE '%SP'
+     AND name NOT LIKE '%snapshot%'
+     AND name NOT LIKE '%stg'
+	 AND name NOT LIKE '%_old'
+	 AND state_desc NOT LIKE '%RESTORING%'
+   ORDER BY [name];
+
+-- Recreate staging table
+IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL DROP TABLE admindba.dbo.mytest;
+CREATE TABLE admindba.dbo.mytest
+(
+    dbname VARCHAR(100),
+    ftppass NVARCHAR(256)
+);
+
+OPEN curDB  
+FETCH NEXT FROM curDB INTO @DB  
+WHILE @@FETCH_STATUS = 0  
+BEGIN 
+    IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+    BEGIN 
+        -- Get ftpUserName (checking DB level)
+        SET @sql =N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName LIKE ''ftpUserName'''; 
+        EXECUTE sp_executesql @sql, 
+            N'@DBLevel NVARCHAR(250) OUTPUT', 
+            @DBLevel=@DBLevel OUTPUT;
+
+        IF @DBLevel <> 'ftpUserName'
+        BEGIN 
+            -- Insert decrypted ftpPassword into staging table
+            SET @sql=N'USE '+@DB+';
+INSERT INTO admindba.dbo.mytest
+SELECT TOP(1) DB_NAME() AS DBName,
+       CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
+FROM dbo.ETL_Configuration 
+WHERE ConfigurationName = ''ftpPassword'';';
+            
+            PRINT @sql;
+            EXEC (@sql);
+        END
+    END 
+    FETCH NEXT FROM curDB INTO @DB  
+END  
+
+CLOSE curDB  
+DEALLOCATE curDB;
+
+-- Optional: review staging table
+SELECT * FROM admindba.dbo.mytest;
+
+-- Step 2: Merge data into ETLClientInfo with ClientName directly from dbo.Client
+DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM master..sysdatabases 
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND name NOT LIKE '%SP'
+     AND name NOT LIKE '%snapshot%'
+     AND name NOT LIKE '%stg'
+   ORDER BY [name];
+
+OPEN curDB2  
+FETCH NEXT FROM curDB2 INTO @DB  
+WHILE @@FETCH_STATUS = 0  
 BEGIN
-    SET NOCOUNT ON;
+    IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+    BEGIN 
+        -- Get dbLevel
+        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName = ''dbLevel'';';
+        EXEC sp_executesql @sql,
+            N'@DBLevel NVARCHAR(250) OUTPUT',
+            @DBLevel=@DBLevel OUTPUT;
 
-    ----------------------------------------------------------------------------------
-    -- Ensure logging table exists
-    ----------------------------------------------------------------------------------
-    IF OBJECT_ID('dbo.ETLFailedLog', 'U') IS NULL
-    BEGIN
-        CREATE TABLE dbo.ETLFailedLog (
-            LogID INT IDENTITY(1,1) PRIMARY KEY,
-            ClientCode NVARCHAR(50),
-            DatabaseName SYSNAME,
-            JobName NVARCHAR(128),
-            ServerName NVARCHAR(128),
-            Message NVARCHAR(MAX),
-            Status NVARCHAR(20),
-            StatusType NVARCHAR(50),
-            EventDate DATETIME DEFAULT GETDATE(),
-            RunID UNIQUEIDENTIFIER,
-            LoggedOn DATETIME DEFAULT GETDATE()
-        );
+        IF @DBLevel IS NOT NULL
+        BEGIN 
+            -- Merge into ETLClientInfo with ClientName from dbo.Client
+            SET @sql=N'
+            MERGE admindba.dbo.ETLClientInfo AS target
+            USING (
+                SELECT *
+                FROM (
+                    SELECT
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+
+                        (SELECT TOP 1 ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+
+                        (SELECT TOP 1 ftppass 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS pwd,
+
+                        (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
+                         FROM admindba.dbo.mytest 
+                         WHERE dbname = '''+@DB+''') AS PasswordHash,
+
+                        '''+@DBLevel+''' AS EtlVersion,
+
+                        '''+@DB+''' AS DatabaseName,
+                        CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
+
+                        -- Get ClientName from dbo.Client using prefix match
+                        (SELECT c.ClientName
+                         FROM admindba.dbo.Client c
+                         WHERE c.IsActive = 1
+                           AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
+                        ) AS ClientName,
+
+                        SYSUTCDATETIME() AS EventDate,
+                        1 AS IsActive
+                ) AS src
+                WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND pwd IS NOT NULL
+            ) AS source
+            ON (target.ClientCode = source.ClientCode)
+            WHEN MATCHED THEN
+                UPDATE SET 
+                    target.FtpUserName  = source.FtpUserName,
+                    target.pwd          = source.pwd,
+                    target.PasswordHash = source.PasswordHash,
+                    target.EtlVersion   = source.EtlVersion,
+                    target.DatabaseName = source.DatabaseName,
+                    target.ServerName   = source.ServerName,
+                    target.ClientName   = source.ClientName,
+                    target.EventDate    = source.EventDate,
+                    target.IsActive     = source.IsActive
+            WHEN NOT MATCHED THEN
+                INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+                VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
+            
+            PRINT @sql;
+            EXEC (@sql);
+        END
     END
-
-    ----------------------------------------------------------------------------------
-    -- Declare variable for certificate key
-    ----------------------------------------------------------------------------------
-    DECLARE @ReturnMessage NVARCHAR(MAX) = NULL;
-    DECLARE @RunID UNIQUEIDENTIFIER = NEWID();
-
-    ----------------------------------------------------------------------------------
-    -- Step 1: Clear ETLClientInfo columns
-    ----------------------------------------------------------------------------------
-    UPDATE C
-    SET 
-        C.Message = NULL,
-        C.EventDate = NULL,
-        C.Status = NULL,
-        C.JobName = NULL
-    FROM dbo.ETLClientInfo C;
-
-    ----------------------------------------------------------------------------------
-    -- Step 2: Update ETLClientInfo with last run per job using mapping table
-    ----------------------------------------------------------------------------------
-    UPDATE C
-    SET 
-        C.JobName   = M.JobName,
-        C.Message   = SJH.message,
-        C.EventDate = DATEADD(S, 
-                        (SJH.run_time / 10000) * 60 * 60 + 
-                        ((SJH.run_time - (SJH.run_time / 10000) * 10000) / 100) * 60 + 
-                        (SJH.run_time - (SJH.run_time / 100) * 100), 
-                        CONVERT(DATETIME, RTRIM(SJH.run_date), 113)),
-        C.Status    = CASE 
-                        WHEN SJH.run_status = 0 THEN 'Failed'
-                        WHEN SJH.run_status = 1 THEN 'Succeeded'
-                        WHEN SJH.run_status = 2 THEN 'Retry'
-                        WHEN SJH.run_status = 3 THEN 'Cancelled'
-                        ELSE 'Unknown'
-                      END
-    FROM dbo.ETLClientInfo C
-    INNER JOIN dbo.ETLClientJobMapping M
-        ON C.ClientCode = M.ClientCode AND C.DatabaseName = M.DatabaseName
-    INNER JOIN msdb..sysjobs SJ
-        ON SJ.name = M.JobName
-    CROSS APPLY (
-        SELECT TOP 1 *
-        FROM msdb..sysjobhistory H
-        WHERE H.job_id = SJ.job_id
-          AND H.step_id = 0
-        ORDER BY H.run_date DESC, H.run_time DESC
-    ) SJH
-    WHERE M.IsActive = 1
-      AND C.IsActive = 1;
-
-    ----------------------------------------------------------------------------------
-    -- Step 3: Log all active clients/jobs once
-    ----------------------------------------------------------------------------------
-    INSERT INTO dbo.ETLFailedLog (ClientCode, DatabaseName, JobName, ServerName, Message, Status, StatusType, EventDate, RunID)
-    SELECT 
-        C.ClientCode,
-        C.DatabaseName,
-        M.JobName,
-        C.ServerName,
-        C.Message,
-        ISNULL(C.Status, 'Null') AS Status,
-        'Baseline' AS StatusType,
-        ISNULL(C.EventDate, GETDATE()),
-        @RunID
-    FROM dbo.ETLClientInfo C
-    INNER JOIN dbo.ETLClientJobMapping M
-        ON C.ClientCode = M.ClientCode AND C.DatabaseName = M.DatabaseName
-    WHERE C.IsActive = 1 AND M.IsActive = 1;
-
-    ----------------------------------------------------------------------------------
-    -- Step 4a: Database Initialization (once per database)
-    ----------------------------------------------------------------------------------
-    DECLARE @InitSQL NVARCHAR(MAX) = N'';
-
-    SELECT @InitSQL = STRING_AGG(
-    N'BEGIN TRY
-        USE ' + QUOTENAME(X.DatabaseName) + N';
-        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
-            DROP SYMMETRIC KEY FTPPSWDKey;
-        IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
-            DROP CERTIFICATE CertificateETLFTP;
-        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
-            DROP MASTER KEY;
-        EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
-    END TRY
-    BEGIN CATCH
-    END CATCH',
-    CHAR(13)+CHAR(10))
-    FROM (SELECT DISTINCT C.DatabaseName FROM dbo.ETLClientInfo C WHERE C.IsActive = 1) X;
-
-    IF @InitSQL IS NOT NULL
-        EXEC sp_executesql @InitSQL, N'@ReturnMessage NVARCHAR(MAX) OUTPUT', @ReturnMessage=@ReturnMessage OUTPUT;
-
-    ----------------------------------------------------------------------------------
-    -- Step 4b: Execute each job per client
-    ----------------------------------------------------------------------------------
-    DECLARE @ClientCode NVARCHAR(50),
-            @DatabaseName SYSNAME,
-            @JobName NVARCHAR(128),
-            @Pwd NVARCHAR(MAX),
-            @SQL NVARCHAR(MAX);
-
-    DECLARE ClientCursor CURSOR FOR
-    SELECT 
-        M.ClientCode,
-        M.DatabaseName,
-        M.JobName,
-        ISNULL(C.Pwd,'') AS Pwd
-    FROM dbo.ETLClientJobMapping M
-    INNER JOIN dbo.ETLClientInfo C
-        ON C.ClientCode = M.ClientCode AND C.DatabaseName = M.DatabaseName
-    WHERE C.IsActive = 1 AND M.IsActive = 1;
-
-    OPEN ClientCursor;
-    FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
-
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        SET @SQL = '
-        BEGIN TRY
-            USE ' + QUOTENAME(@DatabaseName) + ';
-            EXEC [dbo].[BI_spETLConfigurationInsert]
-                @clientid = ''' + @ClientCode + ''',
-                @FtpPassword = ''' + @Pwd + ''';
-            USE msdb;
-            EXEC msdb.dbo.sp_start_job @job_name = ''' + @JobName + ''';
-        END TRY
-        BEGIN CATCH
-        END CATCH';
-
-        EXEC sp_executesql @SQL;
-
-        FETCH NEXT FROM ClientCursor INTO @ClientCode, @DatabaseName, @JobName, @Pwd;
-    END
-
-    CLOSE ClientCursor;
-    DEALLOCATE ClientCursor;
-
-    ----------------------------------------------------------------------------------
-    -- Step 5: Send email only for failed/null clients
-    ----------------------------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM dbo.ETLFailedLog L WHERE L.RunID = @RunID AND L.Status <> 'Succeeded')
-    BEGIN
-        DECLARE @body NVARCHAR(MAX);
-        DECLARE @ServerNames NVARCHAR(MAX);
-        DECLARE @subject NVARCHAR(512);
-
-        SELECT @ServerNames = STRING_AGG(L.ServerName, ', ')
-        FROM (SELECT DISTINCT L.ServerName FROM dbo.ETLFailedLog L WHERE L.RunID = @RunID AND L.Status <> 'Succeeded') AS L;
-
-        SET @body = 
-        N'<h3>ETL Execution Report - Failed Clients</h3>' +
-        N'<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;">' +
-        N'<tr style="background-color:lightblue;">
-<th>ClientCode</th><th>ServerName</th><th>DatabaseName</th>
-<th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
-        (
-            SELECT STRING_AGG(
-                N'<tr><td>' + ISNULL(L.ClientCode,'') + N'</td>' +
-                N'<td>' + ISNULL(L.ServerName,'') + N'</td>' +
-                N'<td>' + ISNULL(L.DatabaseName,'') + N'</td>' +
-                N'<td>' + ISNULL(L.JobName,'') + N'</td>' +
-                N'<td>' + ISNULL(L.Message,'') + N'</td>' +
-                N'<td>' + ISNULL(L.Status,'') + N'</td>' +
-                N'<td>' + ISNULL(CONVERT(VARCHAR(20),L.EventDate,120),'') + N'</td></tr>'
-            , CHAR(13)+CHAR(10))
-            FROM dbo.ETLFailedLog L
-            WHERE L.RunID = @RunID AND L.Status <> 'Succeeded'
-        );
-
-        SET @body = @body + N'</table>';
-        SET @subject = N'ETL Execution Report - Failed Clients Only'
-                       + CASE WHEN @ServerNames IS NOT NULL THEN N' | Servers: ' + @ServerNames ELSE N'' END;
-
-        EXEC msdb.dbo.sp_send_dbmail
-            @profile_name = 'DBA',
-            @recipients   = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
-            @subject      = @subject,
-            @body         = @body,
-            @body_format  = 'HTML';
-    END
-
-    ----------------------------------------------------------------------------------
-    -- Step 6: Cleanup old logs (>10 days)
-    ----------------------------------------------------------------------------------
-    DELETE FROM dbo.ETLFailedLog
-    WHERE LoggedOn < DATEADD(DAY, -10, GETDATE());
+    FETCH NEXT FROM curDB2 INTO @DB
 END
-GO
+
+CLOSE curDB2
+DEALLOCATE curDB2;
+
+-- Final review of ETLClientInfo
+SELECT * FROM admindba.dbo.ETLClientInfo;
+
+--Truncate Table admindba.dbo.ETLClientInfo
