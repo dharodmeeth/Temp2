@@ -16,17 +16,15 @@ Description:
 4. Creates ETLClientInfo table if it does not exist.
 5. Preserves historical data; safe to run multiple times daily.
 
-Owner: DBA / ETL Team
+Owner: Meeth Dharod
 Created On: 30-Sep-2025
 ===================================================================================================
 */
 
 -- Drop procedure if it already exists
-IF OBJECT_ID('dbo.usp_UpdateETLClientInfo', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.usp_UpdateETLClientInfo;
-GO
 
-CREATE PROCEDURE dbo.usp_UpdateETLClientInfo
+
+CREATE OR ALTER PROCEDURE dbo.usp_UpdateETLClientInfo
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -37,23 +35,29 @@ BEGIN
     IF OBJECT_ID('dbo.ETLClientInfo','U') IS NULL
     BEGIN
         CREATE TABLE [dbo].[ETLClientInfo](
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-            [IsActive] [bit] NOT NULL,
-              NULL,
-            [Message] [nvarchar](max) NULL,
-              NULL,
-              NULL,
-              NULL
-        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+	[ClientCode] [varchar](50) NULL,
+	[ClientName] [nvarchar](200) NULL,
+	[DatabaseName] [nvarchar](200) NULL,
+	[ServerName] [nvarchar](200) NULL,
+	[FtpUserName] [nvarchar](150) NULL,
+	[PasswordHash] [varbinary](256) NULL,
+	[EtlVersion] [nvarchar](50) NULL,
+	[IsActive] [bit] NOT NULL,
+	[JobName] [nvarchar](200) NULL,
+	[Message] [nvarchar](max) NULL,
+	[EventDate] [datetime2](0) NULL,
+	[Status] [nvarchar](50) NULL,
+	[Pwd] [nvarchar](200) NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
 
-        ALTER TABLE [dbo].[ETLClientInfo] ADD DEFAULT ((1)) FOR [IsActive];
-        ALTER TABLE [dbo].[ETLClientInfo] ADD DEFAULT (SYSUTCDATETIME()) FOR [EventDate];
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate];
+GO
+
     END
 
     -----------------------------
