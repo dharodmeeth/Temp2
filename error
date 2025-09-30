@@ -1,3 +1,40 @@
+
+USE [ADMINDBA]
+GO
+
+/****** Object:  Table [dbo].[ETLClientInfo]    Script Date: 9/30/2025 5:27:52 PM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[ETLClientInfo](
+	[ClientCode] [varchar](50) NULL,
+	[ClientName] [nvarchar](200) NULL,
+	[DatabaseName] [nvarchar](200) NULL,
+	[ServerName] [nvarchar](200) NULL,
+	[FtpUserName] [nvarchar](150) NULL,
+	[PasswordHash] [varbinary](256) NULL,
+	[EtlVersion] [nvarchar](50) NULL,
+	[IsActive] [bit] NOT NULL,
+	[JobName] [nvarchar](200) NULL,
+	[Message] [nvarchar](max) NULL,
+	[EventDate] [datetime2](0) NULL,
+	[Status] [nvarchar](50) NULL,
+	[Pwd] [nvarchar](200) NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate]
+GO
+
+
+
+
 -- Drop procedure if it already exists
 IF OBJECT_ID('admindba.dbo.ETL_ClientInfo', 'P') IS NOT NULL
     DROP PROCEDURE admindba.dbo.ETL_ClientInfo;
