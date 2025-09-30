@@ -1,6 +1,6 @@
-Msg 134, Level 15, State 1, Line 25
-The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
-Msg 134, Level 15, State 1, Line 39
-The variable name '@ReturnMessage' has already been declared. Variable names must be unique within a query batch or stored procedure.
-
-(1 row(s) affected)
+Msg 102, Level 15, State 1, Procedure usp_UpdateETLClientInfo, Line 44 [Batch Start Line 7]
+Incorrect syntax near ';'.
+Msg 156, Level 15, State 1, Line 66
+Incorrect syntax near the keyword 'DECLARE'.
+Msg 102, Level 15, State 1, Line 213
+Incorrect syntax near 'END'.
