@@ -1,7 +1,7 @@
 -- ===========================================
--- Step 1: Collect ftpPassword + ClientCode (SourceCode) from all databases into mytest
+-- Step 1: Collect ftpPassword + ClientCode (SourceCode/ClientID) from all databases into mytest
 -- ===========================================
-DECLARE @sql NVARCHAR(max), @DBLevel NVARCHAR(250)
+DECLARE @sql NVARCHAR(max)
 DECLARE @DB sysname  
 
 DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
@@ -20,7 +20,7 @@ IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL DROP TABLE admindba.dbo.myte
 CREATE TABLE admindba.dbo.mytest
 (
     dbname     VARCHAR(100),
-    ClientCode NVARCHAR(200),        -- NEW: store SourceCode/ClientID
+    ClientCode NVARCHAR(200),        
     ftppass    NVARCHAR(256)
 );
 
@@ -30,23 +30,25 @@ WHILE @@FETCH_STATUS = 0
 BEGIN 
     IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
-        -- Grab any SourceCode present in that DB
         SET @sql = N'
         USE '+QUOTENAME(@DB)+';
         INSERT INTO admindba.dbo.mytest (dbname, ClientCode, ftppass)
-        SELECT TOP (1)
+        SELECT 
             DB_NAME() AS dbname,
-            sc.ConfigurationValue AS ClientCode,        -- NEW: SourceCode / ClientID
+            sc.ConfigurationValue AS ClientCode,       
             CONVERT(NVARCHAR(MAX),
-                DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, pw.ConfigurationEncrypted)
+                DECRYPTBYKEYAUTOCERT(
+                    CERT_ID(''CertificateETLFTP''), 
+                    NULL, 
+                    pw.ConfigurationEncrypted
+                )
             ) AS ftppass
         FROM dbo.ETL_Configuration sc
         INNER JOIN dbo.ETL_Configuration pw
-            ON 1=1
-        WHERE sc.ConfigurationName IN (''SourceCode'', ''ClientID'')   -- NEW: pull client identifier
-          AND pw.ConfigurationName = ''ftpPassword'';';
+            ON pw.ConfigurationName = ''ftpPassword''
+        WHERE sc.ConfigurationName IN (''SourceCode'', ''ClientID'');';  -- multiple rows if multiple client codes
         
-        PRINT @sql;  -- for debugging
+        PRINT @sql;  -- debug
         EXEC (@sql);
     END 
     FETCH NEXT FROM curDB INTO @DB  
