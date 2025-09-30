@@ -1,4 +1,6 @@
+-- ===========================================
 -- Step 1: Collect ftpPassword from all databases into mytest
+-- ===========================================
 DECLARE @sql NVARCHAR(max), @DBLevel NVARCHAR(250)
 DECLARE @DB sysname  
 
@@ -9,8 +11,8 @@ DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR
      AND name NOT LIKE '%SP'
      AND name NOT LIKE '%snapshot%'
      AND name NOT LIKE '%stg'
-	 AND name NOT LIKE '%_old'
-	 AND state_desc NOT LIKE '%RESTORING%'
+     AND name NOT LIKE '%_old'
+     AND state_desc NOT LIKE '%RESTORING%'
    ORDER BY [name];
 
 -- Recreate staging table
@@ -28,7 +30,7 @@ BEGIN
     IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
         -- Get ftpUserName (checking DB level)
-        SET @sql =N'SELECT @DBLevel=ConfigurationValue 
+        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
                      FROM ['+@DB+'].dbo.ETL_Configuration 
                      WHERE ConfigurationName LIKE ''ftpUserName'''; 
         EXECUTE sp_executesql @sql, 
@@ -58,7 +60,9 @@ DEALLOCATE curDB;
 -- Optional: review staging table
 SELECT * FROM admindba.dbo.mytest;
 
+-- ===========================================
 -- Step 2: Merge multiple ClientCodes and multiple FTP accounts per database
+-- ===========================================
 
 DECLARE curDB CURSOR FOR  
 SELECT [name]   
@@ -71,12 +75,11 @@ ORDER BY [name];
 
 OPEN curDB  
 FETCH NEXT FROM curDB INTO @DB  
+
 WHILE @@FETCH_STATUS = 0  
 BEGIN
     IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
-
-
         SET @sql = N'
         ;WITH ClientCTE AS (
             SELECT ConfigurationValue AS ClientCode
@@ -84,7 +87,8 @@ BEGIN
             WHERE ConfigurationName = ''ClientID''
         ),
         FtpCTE AS (
-            SELECT ftppass, ConfigurationValue AS FtpUserName
+            SELECT ConfigurationValue AS FtpUserName,
+                   m.ftppass
             FROM ['+@DB+'].dbo.ETL_Configuration e
             LEFT JOIN admindba.dbo.mytest m
                 ON m.dbname = '''+@DB+'''
@@ -107,6 +111,7 @@ BEGIN
             LEFT JOIN admindba.dbo.Client cl
                 ON cl.IsActive = 1
                 AND LEFT('''+@DB+''', LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
+            WHERE f.ftppass IS NOT NULL  -- <<<<< Only include rows with password
         ) AS source
         ON target.ClientCode = source.ClientCode 
            AND target.DatabaseName = source.DatabaseName
