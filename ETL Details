@@ -46,7 +46,7 @@ BEGIN
             [EventDate]     DATETIME2(0)   NULL DEFAULT SYSUTCDATETIME(),
             [Status]        NVARCHAR(50)   NULL,
             [Pwd]           NVARCHAR(200)  NULL
-        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+        )
         ');
     END
 
@@ -61,7 +61,8 @@ BEGIN
         (
             dbname VARCHAR(100),
             ftppass NVARCHAR(256)
-        )');
+        )
+        ');
 
     -----------------------------
     -- Step 2: Collect ftpPassword from all databases into staging table
@@ -84,7 +85,7 @@ BEGIN
     FETCH NEXT FROM curDB INTO @DB  
     WHILE @@FETCH_STATUS = 0  
     BEGIN 
-        IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
         BEGIN 
             -- Get ftpUserName
             SET @sql =N'SELECT @DBLevel=ConfigurationValue 
@@ -97,11 +98,11 @@ BEGIN
             IF @DBLevel <> 'ftpUserName'
             BEGIN 
                 -- Insert decrypted ftpPassword into staging table
-                SET @sql=N'USE ['+@DB+'];
+                SET @sql=N'
 INSERT INTO admindba.dbo.mytest
 SELECT TOP(1) DB_NAME() AS DBName,
        CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
-FROM dbo.ETL_Configuration 
+FROM ['+@DB+'].dbo.ETL_Configuration
 WHERE ConfigurationName = ''ftpPassword'';';
                 
                 EXEC (@sql);
@@ -129,7 +130,7 @@ WHERE ConfigurationName = ''ftpPassword'';';
     FETCH NEXT FROM curDB2 INTO @DB  
     WHILE @@FETCH_STATUS = 0  
     BEGIN
-        IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
         BEGIN 
             -- Get dbLevel
             SET @sql = N'SELECT @DBLevel=ConfigurationValue 
