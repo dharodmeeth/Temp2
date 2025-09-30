@@ -51,7 +51,20 @@ BEGIN
     END
 
     -----------------------------
-    -- Step 1: Collect ftpPassword from all databases into staging table
+    -- Step 1: Create/Truncate staging table
+    -----------------------------
+    IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL
+        TRUNCATE TABLE admindba.dbo.mytest;
+    ELSE
+        EXEC('
+        CREATE TABLE admindba.dbo.mytest
+        (
+            dbname VARCHAR(100),
+            ftppass NVARCHAR(256)
+        )');
+
+    -----------------------------
+    -- Step 2: Collect ftpPassword from all databases into staging table
     -----------------------------
     DECLARE @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250)
     DECLARE @DB sysname  
@@ -66,16 +79,6 @@ BEGIN
          AND name NOT LIKE '%_old'
          AND state_desc NOT LIKE '%RESTORING%'
        ORDER BY [name];
-
-    -- Recreate staging table
-    IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL
-        TRUNCATE TABLE admindba.dbo.mytest;
-    ELSE
-        CREATE TABLE admindba.dbo.mytest
-        (
-            dbname VARCHAR(100),
-            ftppass NVARCHAR(256)
-        );
 
     OPEN curDB  
     FETCH NEXT FROM curDB INTO @DB  
@@ -111,7 +114,7 @@ WHERE ConfigurationName = ''ftpPassword'';';
     DEALLOCATE curDB;
 
     -----------------------------
-    -- Step 2: Merge data into ETLClientInfo
+    -- Step 3: Merge data into ETLClientInfo
     -----------------------------
     DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
        SELECT [name]   
@@ -138,7 +141,7 @@ WHERE ConfigurationName = ''ftpPassword'';';
 
             IF @DBLevel IS NOT NULL
             BEGIN 
-                -- Merge into ETLClientInfo
+                -- Fully dynamic MERGE including ftppass reference
                 SET @sql=N'
 MERGE admindba.dbo.ETLClientInfo AS target
 USING (
@@ -154,11 +157,11 @@ USING (
              WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
 
             (SELECT TOP 1 ftppass 
-             FROM admindba.dbo.mytest 
+             FROM admindba.dbo.mytest WITH (NOLOCK)
              WHERE dbname = '''+@DB+''') AS pwd,
 
             (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
-             FROM admindba.dbo.mytest 
+             FROM admindba.dbo.mytest WITH (NOLOCK)
              WHERE dbname = '''+@DB+''') AS PasswordHash,
 
             '''+@DBLevel+''' AS EtlVersion,
@@ -191,9 +194,9 @@ WHEN MATCHED THEN
         target.IsActive     = source.IsActive
 WHEN NOT MATCHED THEN
     INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
-    VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
-                
-                EXEC (@sql);
+    VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
+';
+                EXEC(@sql);
             END
         END
         FETCH NEXT FROM curDB2 INTO @DB
