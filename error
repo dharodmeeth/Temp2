@@ -1,18 +1,19 @@
 -- ===========================================
--- FINAL SCRIPT: Collect FTP passwords per ClientCode and merge into ETLClientInfo
+-- FULL END-TO-END SCRIPT: Collect FTP credentials and merge into ETLClientInfo
 -- ===========================================
 
 -- Step 0: Clean up staging table
 IF OBJECT_ID('admindba.dbo.mytest','U') IS NOT NULL DROP TABLE admindba.dbo.mytest;
 CREATE TABLE admindba.dbo.mytest
 (
-    dbname     VARCHAR(100),
-    ClientCode NVARCHAR(200),
-    ftppass    NVARCHAR(256)
+    DatabaseName VARCHAR(100),
+    ClientCode   NVARCHAR(200),
+    FtpUserName  NVARCHAR(200),
+    ftppass      NVARCHAR(256)
 );
 
 -- ===========================================
--- Step 1: Collect ClientCode + ftpPassword from all databases
+-- Step 1: Collect DatabaseName + ClientCode + FtpUserName + ftpPassword
 -- ===========================================
 DECLARE @DB sysname, @sql NVARCHAR(MAX);
 
@@ -20,8 +21,7 @@ DECLARE curDB CURSOR FOR
 SELECT [name]
 FROM sys.databases
 WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
-  AND state_desc = 'ONLINE'
-ORDER BY [name];
+  AND state_desc = 'ONLINE';
 
 OPEN curDB
 FETCH NEXT FROM curDB INTO @DB
@@ -29,19 +29,21 @@ WHILE @@FETCH_STATUS = 0
 BEGIN
     IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL
     BEGIN
-        -- Insert all ClientCodes from this DB with their decrypted password
         SET @sql = '
         USE '+QUOTENAME(@DB)+';
-        INSERT INTO admindba.dbo.mytest (dbname, ClientCode, ftppass)
+        INSERT INTO admindba.dbo.mytest (DatabaseName, ClientCode, FtpUserName, ftppass)
         SELECT 
-            DB_NAME(),
+            DB_NAME() AS DatabaseName,
             sc.ConfigurationValue AS ClientCode,
-            CONVERT(NVARCHAR(MAX),
-                DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, pw.ConfigurationEncrypted)
-            ) AS ftppass
+            un.ConfigurationValue AS FtpUserName,
+            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, pw.ConfigurationEncrypted)) AS ftppass
         FROM dbo.ETL_Configuration sc
         INNER JOIN dbo.ETL_Configuration pw
             ON pw.ConfigurationName = ''ftpPassword''
+        INNER JOIN dbo.ETL_Configuration un
+            ON un.ConfigurationName = ''ftpUserName''
+           AND un.ConfigurationValue IS NOT NULL
+           AND un.ConfigurationValue LIKE sc.ConfigurationValue + ''%''  -- optional: tie ftpUserName to ClientCode
         WHERE sc.ConfigurationName IN (''SourceCode'',''ClientID'');';
 
         EXEC (@sql);
@@ -54,85 +56,47 @@ CLOSE curDB
 DEALLOCATE curDB;
 
 -- Optional: check staging table
-SELECT * FROM admindba.dbo.mytest;
+-- SELECT * FROM admindba.dbo.mytest ORDER BY DatabaseName, ClientCode;
 
 -- ===========================================
--- Step 2: Merge into ETLClientInfo, one row per ClientCode
+-- Step 2: Merge staging table into ETLClientInfo
 -- ===========================================
-DECLARE @DB2 sysname, @sql2 NVARCHAR(MAX);
-
-DECLARE curDB2 CURSOR FOR
-SELECT [name]
-FROM sys.databases
-WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
-  AND state_desc = 'ONLINE'
-ORDER BY [name];
-
-OPEN curDB2
-FETCH NEXT FROM curDB2 INTO @DB2
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    IF OBJECT_ID('['+@DB2+'].dbo.ETL_Configuration') IS NOT NULL
-    BEGIN
-        SET @sql2 = '
-        ;WITH ClientCTE AS (
-            SELECT ConfigurationValue AS ClientCode
-            FROM ['+@DB2+'].dbo.ETL_Configuration
-            WHERE ConfigurationName IN (''SourceCode'',''ClientID'')
-        ),
-        FtpCTE AS (
-            SELECT m.ClientCode, e.ConfigurationValue AS FtpUserName, m.ftppass
-            FROM ['+@DB2+'].dbo.ETL_Configuration e
-            INNER JOIN admindba.dbo.mytest m
-                ON m.dbname = '''+@DB2+'''
-               AND m.ClientCode = e.ConfigurationValue
-            WHERE e.ConfigurationName = ''ftpUserName''
-        )
-        MERGE admindba.dbo.ETLClientInfo AS target
-        USING (
-            SELECT 
-                c.ClientCode,
-                f.FtpUserName,
-                f.ftppass AS pwd,
-                CONVERT(VARBINARY(256), f.ftppass) AS PasswordHash,
-                '''+@DB2+''' AS DatabaseName,
-                CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-                cl.ClientName,
-                SYSUTCDATETIME() AS EventDate,
-                1 AS IsActive
-            FROM ClientCTE c
-            INNER JOIN FtpCTE f
-                ON f.ClientCode = c.ClientCode
-            LEFT JOIN admindba.dbo.Client cl
-                ON cl.IsActive = 1
-               AND LEFT('''+@DB2+''', LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
-        ) AS source
-        ON target.ClientCode = source.ClientCode
-           AND target.DatabaseName = source.DatabaseName
-           AND target.FtpUserName = source.FtpUserName
-        WHEN MATCHED THEN
-            UPDATE SET
-                target.pwd = source.pwd,
-                target.PasswordHash = source.PasswordHash,
-                target.ServerName = source.ServerName,
-                target.ClientName = source.ClientName,
-                target.EventDate = source.EventDate,
-                target.IsActive = source.IsActive
-        WHEN NOT MATCHED THEN
-            INSERT (ClientCode, FtpUserName, pwd, PasswordHash, DatabaseName, ServerName, ClientName, EventDate, IsActive)
-            VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
-
-        EXEC (@sql2);
-    END
-
-    FETCH NEXT FROM curDB2 INTO @DB2
-END
-
-CLOSE curDB2
-DEALLOCATE curDB2;
+MERGE admindba.dbo.ETLClientInfo AS target
+USING (
+    SELECT 
+        DatabaseName,
+        ClientCode,
+        FtpUserName,
+        ftppass AS pwd,
+        CONVERT(VARBINARY(256), ftppass) AS PasswordHash,
+        CAST(SERVERPROPERTY('MachineName') AS NVARCHAR(200)) AS ServerName,
+        cl.ClientName,
+        SYSUTCDATETIME() AS EventDate,
+        1 AS IsActive
+    FROM admindba.dbo.mytest m
+    LEFT JOIN admindba.dbo.Client cl
+        ON cl.IsActive = 1
+       AND LEFT(m.DatabaseName, LEN(cl.ClientDBPrefix)) = cl.ClientDBPrefix
+    WHERE m.ftppass IS NOT NULL
+) AS source
+ON target.ClientCode = source.ClientCode
+   AND target.DatabaseName = source.DatabaseName
+   AND target.FtpUserName = source.FtpUserName
+WHEN MATCHED THEN
+    UPDATE SET
+        target.pwd = source.pwd,
+        target.PasswordHash = source.PasswordHash,
+        target.ServerName = source.ServerName,
+        target.ClientName = source.ClientName,
+        target.EventDate = source.EventDate,
+        target.IsActive = source.IsActive
+WHEN NOT MATCHED THEN
+    INSERT (ClientCode, FtpUserName, pwd, PasswordHash, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+    VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
 
 -- ===========================================
 -- Final review
 -- ===========================================
-SELECT * FROM admindba.dbo.ETLClientInfo
+SELECT * 
+FROM admindba.dbo.ETLClientInfo
 ORDER BY DatabaseName, ClientCode;
