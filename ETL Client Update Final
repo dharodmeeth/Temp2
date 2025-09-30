@@ -34,11 +34,13 @@ BEGIN
     ----------------------------------------------------------------------------------
     -- Step 1: Clear ETLClientInfo columns
     ----------------------------------------------------------------------------------
-    UPDATE dbo.ETLClientInfo
-    SET Message = NULL,
-        EventDate = NULL,
-        Status = NULL,
-        JobName = NULL;
+    UPDATE C
+    SET 
+        C.Message = NULL,
+        C.EventDate = NULL,
+        C.Status = NULL,
+        C.JobName = NULL
+    FROM dbo.ETLClientInfo C;
 
     ----------------------------------------------------------------------------------
     -- Step 2: Update ETLClientInfo with last SQL Agent run per job
@@ -146,7 +148,6 @@ BEGIN
 
     WHILE @@FETCH_STATUS = 0
     BEGIN
-        -- Declare @ReturnMessage once per iteration
         SET @ReturnMessage = NULL;
 
         SET @SQL = '
@@ -176,7 +177,7 @@ BEGIN
     ----------------------------------------------------------------------------------
     -- Step 5: Send email only for failed/null clients
     ----------------------------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM dbo.ETLFailedLog WHERE RunID = @RunID AND Status <> 'Succeeded')
+    IF EXISTS (SELECT 1 FROM dbo.ETLFailedLog L WHERE L.RunID = @RunID AND L.Status <> 'Succeeded')
     BEGIN
         DECLARE @body NVARCHAR(MAX);
         DECLARE @ServerNames NVARCHAR(MAX);
