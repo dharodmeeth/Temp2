@@ -11,6 +11,191 @@ GO
 Procedure Name: dbo.usp_UpdateETLClientInfo
 Description:
 1. Collects ETL client information from all active user databases.
+2. Decrypts and stages FTP passwords in a staging table.
+3. Updates existing clients or inserts new clients into ETLClientInfo.
+4. Creates ETLClientInfo table if it does not exist.
+5. Preserves historical data; safe to run multiple times daily.
+
+Owner: Meeth Dharod
+Created On: 30-Sep-2025
+===================================================================================================
+*/
+
+CREATE OR ALTER PROCEDURE dbo.usp_UpdateETLClientInfo
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @sql NVARCHAR(MAX), @DB sysname, @DBLevel NVARCHAR(250);
+
+    -----------------------------
+    -- Step 0: Create ETLClientInfo if not exists
+    -----------------------------
+    IF OBJECT_ID('dbo.ETLClientInfo','U') IS NULL
+    BEGIN
+        EXEC('
+            CREATE TABLE [dbo].[ETLClientInfo](
+                [ClientCode]    VARCHAR(50)    NULL,
+                [ClientName]    NVARCHAR(200)  NULL,
+                [DatabaseName]  NVARCHAR(200)  NULL,
+                [ServerName]    NVARCHAR(200)  NULL,
+                [FtpUserName]   NVARCHAR(150)  NULL,
+                [PasswordHash]  VARBINARY(256) NULL,
+                [EtlVersion]    NVARCHAR(50)   NULL,
+                [IsActive]      BIT            NOT NULL DEFAULT ((1)),
+                [JobName]       NVARCHAR(200)  NULL,
+                [Message]       NVARCHAR(MAX)  NULL,
+                [EventDate]     DATETIME2(0)   NULL DEFAULT SYSUTCDATETIME(),
+                [Status]        NVARCHAR(50)   NULL,
+                [Pwd]           NVARCHAR(200)  NULL
+            )
+        ')
+    END
+
+    -----------------------------
+    -- Step 1: Create or truncate staging table dynamically
+    -----------------------------
+    IF OBJECT_ID('admindba.dbo.mytest','U') IS NULL
+    BEGIN
+        EXEC('
+            CREATE TABLE admindba.dbo.mytest(
+                dbname VARCHAR(100),
+                ftppass NVARCHAR(256)
+            )
+        ')
+    END
+    ELSE
+    BEGIN
+        EXEC('TRUNCATE TABLE admindba.dbo.mytest')
+    END
+
+    -----------------------------
+    -- Step 2: Collect ftpPassword from all databases into staging table
+    -----------------------------
+    DECLARE curDB CURSOR FOR
+        SELECT name
+        FROM sys.databases
+        WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
+          AND [name] NOT LIKE '%SP'
+          AND [name] NOT LIKE '%snapshot%'
+          AND [name] NOT LIKE '%stg'
+          AND [name] NOT LIKE '%_old'
+          AND state_desc NOT LIKE '%RESTORING%'
+        ORDER BY [name];
+
+    OPEN curDB
+    FETCH NEXT FROM curDB INTO @DB
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @sql = '
+            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'',''U'') IS NOT NULL
+            BEGIN
+                DECLARE @ftpUserName NVARCHAR(250);
+                SELECT TOP 1 @ftpUserName = ConfigurationValue
+                FROM [' + @DB + '].dbo.ETL_Configuration
+                WHERE ConfigurationName = ''ftpUserName'';
+
+                IF @ftpUserName IS NOT NULL
+                BEGIN
+                    INSERT INTO admindba.dbo.mytest(dbname, ftppass)
+                    SELECT TOP 1 DB_NAME(),
+                           CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted))
+                    FROM [' + @DB + '].dbo.ETL_Configuration
+                    WHERE ConfigurationName = ''ftpPassword'';
+                END
+            END
+        ';
+        EXEC(@sql);
+
+        FETCH NEXT FROM curDB INTO @DB
+    END
+    CLOSE curDB
+    DEALLOCATE curDB
+
+    -----------------------------
+    -- Step 3: Merge data into ETLClientInfo dynamically
+    -----------------------------
+    DECLARE curDB2 CURSOR FOR
+        SELECT name
+        FROM sys.databases
+        WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
+          AND [name] NOT LIKE '%SP'
+          AND [name] NOT LIKE '%snapshot%'
+          AND [name] NOT LIKE '%stg'
+        ORDER BY [name];
+
+    OPEN curDB2
+    FETCH NEXT FROM curDB2 INTO @DB
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @sql = '
+            IF OBJECT_ID(''' + @DB + '.dbo.ETL_Configuration'',''U'') IS NOT NULL
+            BEGIN
+                DECLARE @dbLevel NVARCHAR(250);
+                SELECT TOP 1 @dbLevel = ConfigurationValue
+                FROM [' + @DB + '].dbo.ETL_Configuration
+                WHERE ConfigurationName = ''dbLevel'';
+
+                IF @dbLevel IS NOT NULL
+                BEGIN
+                    MERGE admindba.dbo.ETLClientInfo AS target
+                    USING (
+                        SELECT *
+                        FROM (
+                            SELECT
+                                (SELECT TOP 1 ConfigurationValue FROM [' + @DB + '].dbo.ETL_Configuration WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+                                (SELECT TOP 1 ConfigurationValue FROM [' + @DB + '].dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+                                (SELECT TOP 1 ftppass FROM admindba.dbo.mytest WHERE dbname = ''' + @DB + ''') AS Pwd,
+                                (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) FROM admindba.dbo.mytest WHERE dbname = ''' + @DB + ''') AS PasswordHash,
+                                @dbLevel AS EtlVersion,
+                                ''' + @DB + ''' AS DatabaseName,
+                                CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
+                                (SELECT c.ClientName FROM admindba.dbo.Client c WHERE c.IsActive = 1 AND LEFT(''' + @DB + ''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix) AS ClientName,
+                                SYSUTCDATETIME() AS EventDate,
+                                1 AS IsActive
+                        ) AS src
+                        WHERE ClientCode IS NOT NULL AND FtpUserName IS NOT NULL AND Pwd IS NOT NULL
+                    ) AS source
+                    ON (target.ClientCode = source.ClientCode)
+                    WHEN MATCHED THEN UPDATE SET
+                        target.FtpUserName = source.FtpUserName,
+                        target.Pwd = source.Pwd,
+                        target.PasswordHash = source.PasswordHash,
+                        target.EtlVersion = source.EtlVersion,
+                        target.DatabaseName = source.DatabaseName,
+                        target.ServerName = source.ServerName,
+                        target.ClientName = source.ClientName,
+                        target.EventDate = source.EventDate,
+                        target.IsActive = source.IsActive
+                    WHEN NOT MATCHED THEN INSERT
+                        (ClientCode, FtpUserName, Pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
+                        VALUES
+                        (source.ClientCode, source.FtpUserName, source.Pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);
+                END
+            END
+        ';
+        EXEC(@sql);
+
+        FETCH NEXT FROM curDB2 INTO @DB
+    END
+    CLOSE curDB2
+    DEALLOCATE curDB2
+
+END
+GO
+USE [ADMINDBA]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+===================================================================================================
+Procedure Name: dbo.usp_UpdateETLClientInfo
+Description:
+1. Collects ETL client information from all active user databases.
 2. Decrypts and stages FTP passwords in a temporary table.
 3. Updates existing clients or inserts new clients into ETLClientInfo.
 4. Creates ETLClientInfo table if it does not exist.
