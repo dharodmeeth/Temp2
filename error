@@ -46,8 +46,12 @@ BEGIN
             (
                 SELECT ' + 
                     CASE WHEN @SourceColExists = 1 
-                        THEN 'CASE WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' THEN SourceCode ELSE ConfigurationName END AS ClientCode'
-                        ELSE 'ConfigurationName AS ClientCode'
+                        THEN 'CASE 
+                                  WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
+                                  THEN SourceCode 
+                                  ELSE (SELECT ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') 
+                              END AS ClientCode'
+                        ELSE '(SELECT ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
                     END + ',
                     ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
                 FROM dbo.ETL_Configuration
@@ -65,7 +69,7 @@ BEGIN
         END
     END TRY
     BEGIN CATCH
-        PRINT 'Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+        PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH
 
     FETCH NEXT FROM curDB INTO @DB  
