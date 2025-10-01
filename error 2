@@ -34,3 +34,64 @@ OUTER APPLY
 ) ftp
 ORDER BY ci.ClientCode;
 
+
+-----------------------------------------
+
+DECLARE @DB sysname;
+DECLARE @sql NVARCHAR(MAX);
+
+DECLARE curDB CURSOR FOR
+SELECT DISTINCT DatabaseName
+FROM admindba.dbo.ETLClientInfo;
+
+OPEN curDB;
+FETCH NEXT FROM curDB INTO @DB;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    BEGIN TRY
+        -- Check if SourceCode column exists in the current database
+        IF COL_LENGTH(QUOTENAME(@DB) + '.dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
+        BEGIN
+            -- Use SourceCode mapping
+            SET @sql = N'
+                UPDATE ci
+                SET ci.FtpUserName = ec.ConfigurationValue
+                FROM admindba.dbo.ETLClientInfo ci
+                INNER JOIN [' + @DB + '].dbo.ETL_Configuration ec
+                    ON ec.SourceCode = ci.ClientCode
+                WHERE ec.ConfigurationName = ''ftpUserName''
+                  AND ec.SourceCode IS NOT NULL
+                  AND LTRIM(RTRIM(ec.SourceCode)) <> '''';';
+        END
+        ELSE
+        BEGIN
+            -- Use ClientID mapping from ConfigurationValue
+            SET @sql = N'
+                UPDATE ci
+                SET ci.FtpUserName = ec.ConfigurationValue
+                FROM admindba.dbo.ETLClientInfo ci
+                INNER JOIN [' + @DB + '].dbo.ETL_Configuration ec
+                    ON ec.ConfigurationValue = ci.ClientCode
+                WHERE ec.ConfigurationName LIKE ''ClientID%''
+                  AND ec.ConfigurationName = ''ftpUserName'';';
+        END
+
+        EXEC (@sql);
+
+    END TRY
+    BEGIN CATCH
+        PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+    END CATCH;
+
+    FETCH NEXT FROM curDB INTO @DB;
+END
+
+CLOSE curDB;
+DEALLOCATE curDB;
+
+-- Verify results
+SELECT DatabaseName, ClientCode, FtpUserName
+FROM admindba.dbo.ETLClientInfo
+ORDER BY DatabaseName, ClientCode;
+
