@@ -31,30 +31,38 @@ BEGIN
             BEGIN 
                 IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
                 BEGIN
-                    -- 1️⃣ Insert decrypted passwords
+                    -- Single insert to populate both ClientCode and ftppass in the same row
                     SET @sql = N'
                     USE ['+@DB+'];
-                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ftppass)
+                    WITH FtpPasswords AS
+                    (
+                        SELECT 
+                            ConfigurationName,
+                            CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
+                                CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
+                            )) AS ftppass,
+                            ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
+                        FROM dbo.ETL_Configuration
+                        WHERE ConfigurationName LIKE ''ftpPassword%''
+                    ),
+                    ClientCodes AS
+                    (
+                        SELECT 
+                            ConfigurationValue AS ClientCode,
+                            ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
+                        FROM dbo.ETL_Configuration
+                        WHERE ConfigurationName LIKE ''ClientID%''
+                    )
+                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
                     SELECT 
                         '''+@DB+''' AS DatabaseName,
-                        CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
-                            CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
-                        )) AS ftppass
-                    FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ftpPassword%'';';
+                        c.ClientCode,
+                        f.ftppass
+                    FROM FtpPasswords f
+                    JOIN ClientCodes c
+                    ON f.rn = c.rn;';
+                    
                     EXEC (@sql);
-
-                    -- 2️⃣ Insert ClientCode separately
-                    SET @sql = N'
-                    USE ['+@DB+'];
-                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode)
-                    SELECT 
-                        '''+@DB+''' AS DatabaseName,
-                        ConfigurationValue AS ClientCode
-                    FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ftpPassword%'';';
-                    EXEC (@sql);
-
                 END
             END
         END
