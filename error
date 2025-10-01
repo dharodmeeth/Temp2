@@ -23,7 +23,7 @@ BEGIN
         BEGIN 
             IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
             BEGIN
-                -- Single insert to populate ClientCode (from SourceCode) and ftppass in the same row
+                -- Insert ClientCode (SourceCode fallback to ClientID), ftppass, FtpUserName
                 SET @sql = N'
                 USE ['+@DB+'];
                 WITH FtpPasswords AS
@@ -40,18 +40,30 @@ BEGIN
                 ClientCodes AS
                 (
                     SELECT 
-                        SourceCode AS ClientCode,
+                        CASE 
+                            WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
+                                THEN SourceCode
+                            ELSE ConfigurationName  -- fallback to ConfigurationName
+                        END AS ClientCode,
                         ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
                     FROM dbo.ETL_Configuration
                     WHERE ConfigurationName LIKE ''ftpPassword%''
+                ),
+                FtpUser AS
+                (
+                    SELECT ConfigurationValue AS FtpUserName
+                    FROM dbo.ETL_Configuration
+                    WHERE ConfigurationName = ''ftpUserName''
                 )
-                INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
+                INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass, FtpUserName)
                 SELECT 
                     '''+@DB+''' AS DatabaseName,
                     c.ClientCode,
-                    f.ftppass
+                    f.ftppass,
+                    fu.FtpUserName
                 FROM FtpPasswords f
-                JOIN ClientCodes c ON f.rn = c.rn;';
+                JOIN ClientCodes c ON f.rn = c.rn
+                CROSS JOIN FtpUser fu;';
                     
                 EXEC (@sql);
             END
