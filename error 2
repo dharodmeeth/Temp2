@@ -14,12 +14,20 @@ END
 
 
 --------------------------
+USE BRPLPRD;
 
-USE BRPLPRD
+-- 1️⃣ Get all FTP usernames
+SELECT ConfigurationName,
+       ConfigurationValue,
+       SourceCode
+FROM dbo.ETL_Configuration
+WHERE ConfigurationName LIKE '%ftpUserName%'
+ORDER BY ConfigurationName;
 
-SELECT *  FROM dbo.ETL_configuration
-where ConfigurationName like '%ftpusername%'
-
-
-Select * from dbo.ETL_configuration
-where ConfigurationName like '%ClientID%'
+-- 2️⃣ Get all Client IDs
+SELECT ConfigurationName,
+       ConfigurationValue,
+       SourceCode
+FROM dbo.ETL_Configuration
+WHERE ConfigurationName LIKE '%ClientID%'
+ORDER BY ConfigurationName;
