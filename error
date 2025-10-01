@@ -36,9 +36,9 @@ BEGIN
                     -- Insert all ftpPassword entries into ETLTempTable
                     SET @sql = N'
                     USE ['+@DB+'];
-                    INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ftppass)
+                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientID, ftppass)
                     SELECT 
-                        '''+@DB+''' AS DBName,                -- Current database
+                        '''+@DB+''' AS DatabaseName,                -- Current database
                         ConfigurationName AS ClientID,       -- Use ConfigurationName as ClientID
                         CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
                             CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
@@ -61,3 +61,8 @@ END
 
 CLOSE curDB  
 DEALLOCATE curDB;
+
+sELECT * FROM ETLTempTable
+
+
+--tRUNCATE tABLE ETLTempTable
