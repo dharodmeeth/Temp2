@@ -23,7 +23,7 @@ BEGIN
         BEGIN 
             IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
             BEGIN
-                -- Single insert to populate ClientCode, ftppass, and FtpUserName in the same row
+                -- Single insert to populate ClientCode (from SourceCode), ftppass, and FtpUserName in the same row
                 SET @sql = N'
                 USE ['+@DB+'];
                 WITH FtpPasswords AS
@@ -40,10 +40,10 @@ BEGIN
                 ClientCodes AS
                 (
                     SELECT 
-                        ConfigurationValue AS ClientCode,
+                        SourceCode AS ClientCode,
                         ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
                     FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ClientID%''
+                    WHERE ConfigurationName LIKE ''ftpPassword%''
                 ),
                 FtpUser AS
                 (
