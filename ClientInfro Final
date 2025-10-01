@@ -1,26 +1,24 @@
---------------------------------------------------
--- Full ETLClientInfo Update Script
--- Steps: 6a -> 6b (FtpUserName, ETLVersion, ServerName)
---------------------------------------------------
+--------------------------------------------------------------------
+--Script 1
+--------------------------------------------------------------------
 
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @DB sysname;
+DECLARE @DBLevel NVARCHAR(250);
 DECLARE @SourceColExists BIT;
 
-----------------------------------------
--- Step 6a: Populate ETLTempTable
-----------------------------------------
+-- Step 1: Populate ETLTempTable
 DECLARE curDB CURSOR FORWARD_ONLY STATIC
 FOR  
-SELECT [name]   
-FROM sys.databases 
-WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
-  AND name NOT LIKE '%SP'
-  AND name NOT LIKE '%snapshot%'
-  AND name NOT LIKE '%stg'
-  AND name NOT LIKE '%_old'
-  AND state_desc NOT LIKE '%RESTORING%'
-ORDER BY [name];
+    SELECT [name]   
+    FROM sys.databases 
+    WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+      AND name NOT LIKE '%SP'
+      AND name NOT LIKE '%snapshot%'
+      AND name NOT LIKE '%stg'
+      AND name NOT LIKE '%_old'
+      AND state_desc NOT LIKE '%RESTORING%'
+    ORDER BY [name];
 
 OPEN curDB  
 FETCH NEXT FROM curDB INTO @DB  
@@ -69,12 +67,12 @@ BEGIN
                 f.ftppass
             FROM FtpPasswords f
             JOIN ClientCodes c ON f.rn = c.rn;';
-
+            
             EXEC (@sql);
         END
     END TRY
     BEGIN CATCH
-        PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+        --PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH
 
     FETCH NEXT FROM curDB INTO @DB  
@@ -83,14 +81,13 @@ END
 CLOSE curDB  
 DEALLOCATE curDB;
 
--- Verify ETLTempTable
-SELECT TOP 50 * FROM admindba.dbo.ETLTempTable
-ORDER BY DatabaseName, ClientCode;
+--------------------------------------------------------------------
+--Script 2
+--------------------------------------------------------------------
+--------------------------------------------------
+-- Step 6a: Insert into ETLClientInfo with ClientName
+--------------------------------------------------
 
-----------------------------------------
--- Step 6a: Insert into ETLClientInfo
--- Includes ClientName lookup from admindba.dbo.Client
-----------------------------------------
 ;WITH ToInsert AS
 (
     SELECT 
@@ -108,9 +105,15 @@ ORDER BY DatabaseName, ClientCode;
                 -- Match DatabaseName directly
                 c.ClientDBPrefix = t.DatabaseName
                 -- Match DBName without PRD suffix
-                OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%PRD' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) END
+                OR c.ClientDBPrefix = CASE 
+                                          WHEN t.DatabaseName LIKE '%PRD' 
+                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
+                                     END
                 -- Match DBName without UAT suffix
-                OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%UAT' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) END
+                OR c.ClientDBPrefix = CASE 
+                                          WHEN t.DatabaseName LIKE '%UAT' 
+                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
+                                     END
               )
         ORDER BY c.ClientName
     ) c
@@ -126,54 +129,83 @@ SELECT
     ClientName
 FROM ToInsert;
 
--- Verify ETLClientInfo after insert
+--------------------------------------------------
+-- Step 6b: Update ServerName and EtlVersion
+--------------------------------------------------
+
+DECLARE @sql NVARCHAR(MAX);
+DECLARE @DB sysname;
+DECLARE curDB2 CURSOR FOR
+    SELECT DISTINCT DatabaseName
+    FROM admindba.dbo.ETLClientInfo;
+
+OPEN curDB2
+FETCH NEXT FROM curDB2 INTO @DB
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    BEGIN TRY
+        -- Dynamic SQL to get dbLevel from each database
+        SET @sql = N'
+        UPDATE admindba.dbo.ETLClientInfo
+        SET 
+            ServerName = @@SERVERNAME,
+            EtlVersion = (SELECT TOP 1 ConfigurationValue 
+                          FROM [' + @DB + '].dbo.ETL_Configuration 
+                          WHERE ConfigurationName = ''dbLevel'')
+        WHERE DatabaseName = ''' + @DB + ''';';
+        
+        EXEC(@sql);
+    END TRY
+    BEGIN CATCH
+        --PRINT ''Error updating EtlVersion/ServerName for database: ' + @DB + ' | ' + ERROR_MESSAGE();
+    END CATCH
+
+    FETCH NEXT FROM curDB2 INTO @DB
+END
+
+CLOSE curDB2
+DEALLOCATE curDB2;
+
+--------------------------------------------------
+-- Verification
+--------------------------------------------------
 SELECT TOP 50 *
 FROM admindba.dbo.ETLClientInfo
 ORDER BY DatabaseName, ClientCode;
 
-----------------------------------------
--- Step 6b: Update FtpUserName, ETLVersion, ServerName
-----------------------------------------
-DECLARE curDB2 CURSOR FOR
+--------------------------------------------------------------------
+--Script 3
+--------------------------------------------------------------------
+DECLARE @DB sysname;
+DECLARE @sql NVARCHAR(MAX);
+
+DECLARE curDB3 CURSOR FOR
 SELECT DISTINCT DatabaseName
 FROM admindba.dbo.ETLClientInfo;
 
-OPEN curDB2;
-FETCH NEXT FROM curDB2 INTO @DB;
+OPEN curDB;
+FETCH NEXT FROM curDB INTO @DB;
 
 WHILE @@FETCH_STATUS = 0
 BEGIN
     BEGIN TRY
         SET @sql = N'
             UPDATE ci
-            SET 
-                ci.FtpUserName = COALESCE(srcFtp.ConfigurationValue, ci.FtpUserName),
-                ci.EtlVersion  = srcVersion.ConfigurationValue,
-                ci.ServerName  = CAST(SERVERPROPERTY(''ServerName'') AS NVARCHAR(200))
+            SET ci.FtpUserName = ftp.ConfigurationValue
             FROM admindba.dbo.ETLClientInfo ci
             OUTER APPLY
             (
                 SELECT TOP 1 c.ConfigurationValue
                 FROM [' + @DB + '].dbo.ETL_Configuration c
-                WHERE 
-                    (COL_LENGTH(''[' + @DB + '].dbo.ETL_Configuration'', ''SourceCode'') IS NOT NULL
-                     AND c.SourceCode = ci.ClientCode
-                     AND c.ConfigurationName = ''ftpUserName'')
-                    OR
-                    (c.ConfigurationName = ''ftpUserName''
-                     AND EXISTS (
-                         SELECT 1 
-                         FROM [' + @DB + '].dbo.ETL_Configuration cid
-                         WHERE cid.ConfigurationName LIKE ''ClientID%''
-                           AND cid.ConfigurationValue = ci.ClientCode
-                     ))
-            ) srcFtp
-            OUTER APPLY
-            (
-                SELECT TOP 1 ConfigurationValue
-                FROM [' + @DB + '].dbo.ETL_Configuration
-                WHERE ConfigurationName = ''dbLevel''
-            ) srcVersion
+                WHERE c.ConfigurationName = ''ftpUserName''
+                  AND EXISTS (
+                      SELECT 1
+                      FROM [' + @DB + '].dbo.ETL_Configuration cid
+                      WHERE cid.ConfigurationName LIKE ''ClientID%''
+                        AND cid.ConfigurationValue = ci.ClientCode
+                  )
+            ) ftp
             WHERE ci.DatabaseName = ''' + @DB + ''';';
 
         EXEC (@sql);
@@ -182,18 +214,13 @@ BEGIN
         PRINT 'Error updating database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH;
 
-    FETCH NEXT FROM curDB2 INTO @DB;
+    FETCH NEXT FROM curDB INTO @DB;
 END
 
-CLOSE curDB2;
-DEALLOCATE curDB2;
+CLOSE curDB3;
+DEALLOCATE curDB3;
 
--- Final verification
-SELECT DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName
+-- Verify results
+SELECT DatabaseName, ClientCode, FtpUserName
 FROM admindba.dbo.ETLClientInfo
 ORDER BY DatabaseName, ClientCode;
-
-----------------------------------------
--- Optional Step 7: Cleanup staging
-----------------------------------------
-TRUNCATE TABLE admindba.dbo.ETLTempTable;
