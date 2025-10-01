@@ -1,6 +1,7 @@
---------------------------------------------------
--- Step 6a: Populate ETLTempTable with decrypted passwords
---------------------------------------------------
+------------------------------------------------------------
+-- Step 1: Populate ETLTempTable with decrypted FTP passwords
+------------------------------------------------------------
+
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @DB sysname;
 DECLARE @SourceColExists BIT;
@@ -17,59 +18,65 @@ FOR
       AND state_desc NOT LIKE '%RESTORING%'
     ORDER BY [name];
 
-OPEN curDB;  
+OPEN curDB;
 FETCH NEXT FROM curDB INTO @DB;
 
-WHILE @@FETCH_STATUS = 0  
+WHILE @@FETCH_STATUS = 0
 BEGIN
     BEGIN TRY
-        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+        IF OBJECT_ID('[' + @DB + '].dbo.ETL_Configuration') IS NOT NULL
         BEGIN
+            -- Check if SourceCode column exists
             SET @SourceColExists = 0;
-            IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
+            IF COL_LENGTH('[' + @DB + '].dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
                 SET @SourceColExists = 1;
 
+            -- Build dynamic SQL to insert into ETLTempTable
             SET @sql = N'
-            USE [' + @DB + '];
-            WITH FtpPasswords AS
-            (
+                USE [' + @DB + '];
+                WITH FtpPasswords AS
+                (
+                    SELECT 
+                        ConfigurationName,
+                        CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
+                            CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
+                        )) AS ftppass,
+                        ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
+                    FROM dbo.ETL_Configuration
+                    WHERE ConfigurationName LIKE ''ftpPassword%''
+                ),
+                ClientCodes AS
+                (
+                    SELECT ' + 
+                        CASE WHEN @SourceColExists = 1
+                            THEN 'CASE 
+                                      WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
+                                      THEN SourceCode 
+                                      ELSE (SELECT TOP 1 ConfigurationValue 
+                                            FROM dbo.ETL_Configuration 
+                                            WHERE ConfigurationName LIKE ''ClientID%'') 
+                                  END AS ClientCode'
+                            ELSE '(SELECT TOP 1 ConfigurationValue 
+                                   FROM dbo.ETL_Configuration 
+                                   WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
+                        END + ',
+                        ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
+                    FROM dbo.ETL_Configuration
+                    WHERE ConfigurationName LIKE ''ftpPassword%''
+                )
+                INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
                 SELECT 
-                    ConfigurationName,
-                    CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
-                        CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
-                    )) AS ftppass,
-                    ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
-                FROM dbo.ETL_Configuration
-                WHERE ConfigurationName LIKE ''ftpPassword%''
-            ),
-            ClientCodes AS
-            (
-                SELECT ' + 
-                    CASE WHEN @SourceColExists = 1
-                        THEN 'CASE 
-                                  WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
-                                  THEN SourceCode 
-                                  ELSE (SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') 
-                              END AS ClientCode'
-                        ELSE '(SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
-                    END + ',
-                    ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
-                FROM dbo.ETL_Configuration
-                WHERE ConfigurationName LIKE ''ftpPassword%''
-            )
-            INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
-            SELECT 
-                ''' + @DB + ''' AS DatabaseName,
-                c.ClientCode,
-                f.ftppass
-            FROM FtpPasswords f
-            JOIN ClientCodes c ON f.rn = c.rn;';
-
-            EXEC(@sql);
+                    ''' + @DB + ''' AS DatabaseName,
+                    c.ClientCode,
+                    f.ftppass
+                FROM FtpPasswords f
+                JOIN ClientCodes c ON f.rn = c.rn;';
+            
+            EXEC (@sql);
         END
     END TRY
     BEGIN CATCH
-        PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+        PRINT 'Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH;
 
     FETCH NEXT FROM curDB INTO @DB;
@@ -78,55 +85,17 @@ END
 CLOSE curDB;
 DEALLOCATE curDB;
 
--- Verification
-SELECT TOP 50 * FROM admindba.dbo.ETLTempTable
+-- Verify ETLTempTable population
+SELECT TOP 50 *
+FROM admindba.dbo.ETLTempTable
 ORDER BY DatabaseName, ClientCode;
 
+------------------------------------------------------------
+-- Step 2: Update FtpUserName in ETLClientInfo for all databases
+------------------------------------------------------------
 
---------------------------------------------------
--- Step 6b: Insert into ETLClientInfo (PasswordHash & pwd)
---------------------------------------------------
-;WITH ToInsert AS
-(
-    SELECT 
-        t.DatabaseName,
-        t.ClientCode,
-        CONVERT(VARBINARY(256), t.ftppass) AS PasswordHash,
-        t.ftppass AS pwd,
-        c.ClientName
-    FROM admindba.dbo.ETLTempTable t
-    OUTER APPLY (
-        SELECT TOP 1 c.ClientName
-        FROM admindba.dbo.Client c
-        WHERE c.IsActive = 1
-          AND (
-                c.ClientDBPrefix = t.DatabaseName
-                OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%PRD' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) END
-                OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%UAT' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) END
-              )
-        ORDER BY c.ClientName
-    ) c
-    WHERE t.ftppass IS NOT NULL
-)
-INSERT INTO admindba.dbo.ETLClientInfo
-    (DatabaseName, ClientCode, PasswordHash, pwd, ClientName)
-SELECT 
-    DatabaseName,
-    ClientCode,
-    PasswordHash,
-    pwd,
-    ClientName
-FROM ToInsert;
-
--- Verify
-SELECT TOP 50 * FROM admindba.dbo.ETLClientInfo
-ORDER BY DatabaseName, ClientCode;
-
-
---------------------------------------------------
--- Step 6c: Update FtpUserName, ServerName, ETLVersion
---------------------------------------------------
 DECLARE @sqlUpdate NVARCHAR(MAX);
+
 DECLARE curDB2 CURSOR FOR
 SELECT DISTINCT DatabaseName
 FROM admindba.dbo.ETLClientInfo;
@@ -139,32 +108,26 @@ BEGIN
     BEGIN TRY
         SET @sqlUpdate = N'
             UPDATE ci
-            SET 
-                ci.FtpUserName = COALESCE(srcFtp.ConfigurationValue, ci.FtpUserName),
-                ci.ServerName  = CAST(SERVERPROPERTY(''ServerName'') AS NVARCHAR(200)),
-                ci.EtlVersion  = srcVersion.ConfigurationValue
+            SET ci.FtpUserName = ftp.ConfigurationValue
             FROM admindba.dbo.ETLClientInfo ci
-            LEFT JOIN [' + @DB + '].dbo.ETL_Configuration srcFtp
-                ON (COL_LENGTH(''[' + @DB + '].dbo.ETL_Configuration'', ''SourceCode'') IS NOT NULL
-                    AND srcFtp.SourceCode = ci.ClientCode
-                    AND srcFtp.ConfigurationName = ''ftpUserName'')
-                   OR (srcFtp.ConfigurationName = ''ftpUserName''
-                       AND EXISTS (SELECT 1 
-                                   FROM [' + @DB + '].dbo.ETL_Configuration cid
-                                   WHERE cid.ConfigurationName LIKE ''ClientID%''
-                                     AND cid.ConfigurationValue = ci.ClientCode))
             OUTER APPLY
             (
-                SELECT TOP 1 ConfigurationValue
-                FROM [' + @DB + '].dbo.ETL_Configuration
-                WHERE ConfigurationName = ''dbLevel''
-            ) srcVersion
+                SELECT TOP 1 c.ConfigurationValue
+                FROM [' + @DB + '].dbo.ETL_Configuration c
+                WHERE c.ConfigurationName = ''ftpUserName''
+                  AND EXISTS (
+                      SELECT 1
+                      FROM [' + @DB + '].dbo.ETL_Configuration cid
+                      WHERE cid.ConfigurationName LIKE ''ClientID%''
+                        AND cid.ConfigurationValue = ci.ClientCode
+                  )
+            ) ftp
             WHERE ci.DatabaseName = ''' + @DB + ''';';
 
-        EXEC(@sqlUpdate);
+        EXEC (@sqlUpdate);
     END TRY
     BEGIN CATCH
-        PRINT ''Error updating database: ' + @DB + ' | ' + ERROR_MESSAGE();
+        PRINT 'Error updating database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH;
 
     FETCH NEXT FROM curDB2 INTO @DB;
@@ -173,12 +136,7 @@ END
 CLOSE curDB2;
 DEALLOCATE curDB2;
 
--- Final verification
-SELECT DatabaseName, ClientCode, FtpUserName, ServerName, EtlVersion
+-- Verify results
+SELECT DatabaseName, ClientCode, FtpUserName
 FROM admindba.dbo.ETLClientInfo
 ORDER BY DatabaseName, ClientCode;
-
---------------------------------------------------
--- Step 7: Cleanup staging
---------------------------------------------------
-TRUNCATE TABLE admindba.dbo.ETLTempTable;
