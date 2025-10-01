@@ -1,6 +1,7 @@
 USE BRPLPRD;
 
-SELECT ec.*
+SELECT ec.ConfigurationValue AS ftpusername
 FROM dbo.ETL_Configuration ec
 INNER JOIN admindba.dbo.ETLClientInfo ci
-    ON ec.SourceCode = ci.ClientCode;
+    ON ec.SourceCode = ci.ClientCode
+WHERE ec.ConfigurationName = 'ftpUserName';
