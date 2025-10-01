@@ -1,11 +1,11 @@
-DECLARE @sql NVARCHAR(MAX);
+DECLARE @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250);
 DECLARE @DB sysname;
 
--- Cursor to loop through all relevant databases
-DECLARE curDB CURSOR FORWARD_ONLY STATIC FOR  
-SELECT [name]   
+DECLARE curDB CURSOR FORWARD_ONLY STATIC
+FOR
+SELECT [name]
 FROM sys.databases
-WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin')
   AND name NOT LIKE '%SP'
   AND name NOT LIKE '%snapshot%'
   AND name NOT LIKE '%stg'
@@ -13,29 +13,42 @@ WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iw
   AND state_desc NOT LIKE '%RESTORING%'
 ORDER BY [name];
 
-OPEN curDB;
-FETCH NEXT FROM curDB INTO @DB;
+OPEN curDB
+FETCH NEXT FROM curDB INTO @DB
 
-WHILE @@FETCH_STATUS = 0  
-BEGIN 
-    -- Only proceed if ETL_Configuration exists
-    IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
-    BEGIN 
-        -- Insert all ClientIDs and encrypted passwords into ETLTempTable
-        SET @sql = N'
-        INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ConfigurationEncrypted)
-        SELECT DISTINCT 
-            DB_NAME() AS DBName,
-            ClientID,
-            ConfigurationEncrypted
-        FROM [' + @DB + '].dbo.ETL_Configuration
-        WHERE ConfigurationName = ''ftpPassword'';';
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    -- Only proceed if ETL_Configuration exists in this DB
+    IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL
+    BEGIN
+        -- Get ftpUserName (checking DB level)
+        SET @sql = N'SELECT @DBLevel=ConfigurationValue 
+                     FROM ['+@DB+'].dbo.ETL_Configuration 
+                     WHERE ConfigurationName LIKE ''ftpUserName''';
+        EXECUTE sp_executesql @sql, N'@DBLevel NVARCHAR(250) OUTPUT', @DBLevel=@DBLevel OUTPUT;
 
-        EXEC(@sql);
+        IF @DBLevel <> 'ftpUserName' -- Only attempt decrypt if column exists
+        BEGIN
+            IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
+            BEGIN
+                -- Insert all decrypted ftpPasswords (for all ClientID) into permanent staging table
+                SET @sql = N'
+                USE ['+@DB+'];
+                INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ftppass)
+                SELECT 
+                    DB_NAME() AS DBName,
+                    ClientID,
+                    CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
+                FROM dbo.ETL_Configuration
+                WHERE ConfigurationName = ''ftpPassword'';';
+                
+                EXEC (@sql);
+            END
+        END
     END
 
-    FETCH NEXT FROM curDB INTO @DB;  
-END  
+    FETCH NEXT FROM curDB INTO @DB
+END
 
-CLOSE curDB;  
+CLOSE curDB
 DEALLOCATE curDB;
