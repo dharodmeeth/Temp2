@@ -1,24 +1,21 @@
 -- Step 6b: Merge to update ftpUserName, EtlVersion, ServerName, IsActive
 IF @SourceColExists = 1
 BEGIN
-    -- SourceCode exists
+    -- When SourceCode column exists
     SET @sql = N'
     MERGE admindba.dbo.ETLClientInfo AS target
     USING (
         SELECT 
-            SourceCode AS ClientCode,
-            (SELECT TOP 1 ConfigurationValue 
-             FROM dbo.ETL_Configuration 
-             WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
-            (SELECT TOP 1 ConfigurationValue 
-             FROM dbo.ETL_Configuration 
-             WHERE ConfigurationName = ''dbLevel'') AS EtlVersion,
+            LTRIM(RTRIM(SourceCode)) AS ClientCode,
+            MAX(CASE WHEN ConfigurationName = ''ftpUserName'' THEN ConfigurationValue END) AS FtpUserName,
+            MAX(CASE WHEN ConfigurationName = ''ETLVersion'' THEN ConfigurationValue END) AS EtlVersion,
             CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
             1 AS IsActive
         FROM dbo.ETL_Configuration
         WHERE ISNULL(LTRIM(RTRIM(SourceCode)), '''') <> ''''
+        GROUP BY SourceCode
     ) AS source
-    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = '''+@DB+''')
+    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = ''' + @DB + ''')
     WHEN MATCHED THEN
         UPDATE SET 
             target.FtpUserName = source.FtpUserName,
@@ -26,29 +23,26 @@ BEGIN
             target.ServerName  = source.ServerName,
             target.IsActive    = source.IsActive
     WHEN NOT MATCHED THEN
-        INSERT (ClientCode, FtpUserName, EtlVersion, ServerName, IsActive, DatabaseName)
-        VALUES (source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive, '''+@DB+''');';
+        INSERT (DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName, IsActive)
+        VALUES (''' + @DB + ''', source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive);';
 END
 ELSE
 BEGIN
-    -- SourceCode does not exist → use ClientID from ConfigurationValue
+    -- When SourceCode column does NOT exist → use ClientID from ConfigurationValue
     SET @sql = N'
     MERGE admindba.dbo.ETLClientInfo AS target
     USING (
         SELECT 
-            (SELECT TOP 1 ConfigurationValue 
+            (SELECT ConfigurationValue 
              FROM dbo.ETL_Configuration 
              WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode,
-            (SELECT TOP 1 ConfigurationValue 
-             FROM dbo.ETL_Configuration 
-             WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
-            (SELECT TOP 1 ConfigurationValue 
-             FROM dbo.ETL_Configuration 
-             WHERE ConfigurationName = ''dbLevel'') AS EtlVersion,
+            MAX(CASE WHEN ConfigurationName = ''ftpUserName'' THEN ConfigurationValue END) AS FtpUserName,
+            MAX(CASE WHEN ConfigurationName = ''ETLVersion'' THEN ConfigurationValue END) AS EtlVersion,
             CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
             1 AS IsActive
+        FROM dbo.ETL_Configuration
     ) AS source
-    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = '''+@DB+''')
+    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = ''' + @DB + ''')
     WHEN MATCHED THEN
         UPDATE SET 
             target.FtpUserName = source.FtpUserName,
@@ -56,8 +50,8 @@ BEGIN
             target.ServerName  = source.ServerName,
             target.IsActive    = source.IsActive
     WHEN NOT MATCHED THEN
-        INSERT (ClientCode, FtpUserName, EtlVersion, ServerName, IsActive, DatabaseName)
-        VALUES (source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive, '''+@DB+''');';
+        INSERT (DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName, IsActive)
+        VALUES (''' + @DB + ''', source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive);';
 END;
 
 EXEC (@sql);
