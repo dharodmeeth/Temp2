@@ -1,57 +1,32 @@
--- Step 6b: Merge to update ftpUserName, EtlVersion, ServerName, IsActive
-IF @SourceColExists = 1
-BEGIN
-    -- When SourceCode column exists
-    SET @sql = N'
-    MERGE admindba.dbo.ETLClientInfo AS target
-    USING (
-        SELECT 
-            LTRIM(RTRIM(SourceCode)) AS ClientCode,
-            MAX(CASE WHEN ConfigurationName = ''ftpUserName'' THEN ConfigurationValue END) AS FtpUserName,
-            MAX(CASE WHEN ConfigurationName = ''ETLVersion'' THEN ConfigurationValue END) AS EtlVersion,
-            CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-            1 AS IsActive
-        FROM dbo.ETL_Configuration
-        WHERE ISNULL(LTRIM(RTRIM(SourceCode)), '''') <> ''''
-        GROUP BY SourceCode
-    ) AS source
-    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = ''' + @DB + ''')
-    WHEN MATCHED THEN
-        UPDATE SET 
-            target.FtpUserName = source.FtpUserName,
-            target.EtlVersion  = source.EtlVersion,
-            target.ServerName  = source.ServerName,
-            target.IsActive    = source.IsActive
-    WHEN NOT MATCHED THEN
-        INSERT (DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName, IsActive)
-        VALUES (''' + @DB + ''', source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive);';
-END
-ELSE
-BEGIN
-    -- When SourceCode column does NOT exist → use ClientID from ConfigurationValue
-    SET @sql = N'
-    MERGE admindba.dbo.ETLClientInfo AS target
-    USING (
-        SELECT 
-            (SELECT ConfigurationValue 
-             FROM dbo.ETL_Configuration 
-             WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode,
-            MAX(CASE WHEN ConfigurationName = ''ftpUserName'' THEN ConfigurationValue END) AS FtpUserName,
-            MAX(CASE WHEN ConfigurationName = ''ETLVersion'' THEN ConfigurationValue END) AS EtlVersion,
-            CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-            1 AS IsActive
-        FROM dbo.ETL_Configuration
-    ) AS source
-    ON (target.ClientCode = source.ClientCode AND target.DatabaseName = ''' + @DB + ''')
-    WHEN MATCHED THEN
-        UPDATE SET 
-            target.FtpUserName = source.FtpUserName,
-            target.EtlVersion  = source.EtlVersion,
-            target.ServerName  = source.ServerName,
-            target.IsActive    = source.IsActive
-    WHEN NOT MATCHED THEN
-        INSERT (DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName, IsActive)
-        VALUES (''' + @DB + ''', source.ClientCode, source.FtpUserName, source.EtlVersion, source.ServerName, source.IsActive);';
-END;
+SET NOCOUNT ON;
 
-EXEC (@sql);
+-- Step 6a: Insert new rows from ETLTempTable into ETLClientInfo
+;WITH ToInsert AS
+(
+    SELECT 
+        t.DatabaseName,
+        t.ClientCode,
+        CONVERT(VARBINARY(256), t.ftppass) AS PasswordHash,
+        t.ftppass AS pwd
+    FROM admindba.dbo.ETLTempTable t
+    WHERE t.ftppass IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM admindba.dbo.ETLClientInfo c
+          WHERE c.ClientCode = t.ClientCode
+            AND c.DatabaseName = t.DatabaseName
+      )
+)
+INSERT INTO admindba.dbo.ETLClientInfo (DatabaseName, ClientCode, PasswordHash, pwd)
+OUTPUT inserted.DatabaseName, inserted.ClientCode, inserted.PasswordHash, inserted.pwd
+SELECT DatabaseName, ClientCode, PasswordHash, pwd
+FROM ToInsert;
+
+-- show how many rows ETLTempTable had with ftppass
+SELECT COUNT(*) AS TempRowsWithPassword
+FROM admindba.dbo.ETLTempTable
+WHERE ftppass IS NOT NULL;
+
+-- show total rows in ETLClientInfo for quick verification
+SELECT COUNT(*) AS Total_ETLClientInfo_Rows
+FROM admindba.dbo.ETLClientInfo;
