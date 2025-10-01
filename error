@@ -33,16 +33,18 @@ BEGIN
                 -- Only attempt decrypt if column exists
                 IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
                 BEGIN
-                    -- Insert decrypted ftpPassword for all relevant ConfigurationName entries
+                    -- Insert decrypted ftpPassword for all ConfigurationName entries
                     SET @sql = N'
                     USE ['+@DB+'];
                     INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ftppass)
                     SELECT 
-                        DB_NAME() AS DBName,
-                        ConfigurationName AS ClientID,  -- Using ConfigurationName as identifier
+                        -- Extract database name from ConfigurationName
+                        PARSENAME(REPLACE(ConfigurationName, ''ftpPassword_'', '' ''), 1) AS DBName,
+                        -- Extract ClientID from ConfigurationName
+                        PARSENAME(REPLACE(ConfigurationName, ''ftpPassword_'', '' ''), 2) AS ClientID,
                         CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted)) AS ftppass
                     FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ftpPassword%'';';
+                    WHERE ConfigurationName LIKE ''ftpPassword_%'';';
                     
                     EXEC (@sql);
                 END
