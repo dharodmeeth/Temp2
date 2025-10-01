@@ -16,22 +16,19 @@ END
 --------------------------
 USE BRPLPRD;
 
-USE BRPLPRD;
-
 SELECT ci.ClientCode,
        ftp.ConfigurationValue AS ftpUserName
 FROM admindba.dbo.ETLClientInfo ci
 LEFT JOIN dbo.ETL_Configuration ftp
     ON ftp.ConfigurationName = 'ftpUserName'
-    AND (
-        -- If SourceCode exists and is not null, match
-        (COL_LENGTH('dbo.ETL_Configuration', 'SourceCode') IS NOT NULL 
-         AND ftp.SourceCode = ci.ClientCode)
-        -- Otherwise match ClientID
-        OR (COL_LENGTH('dbo.ETL_Configuration', 'SourceCode') IS NULL
-            AND EXISTS (SELECT 1 
-                        FROM dbo.ETL_Configuration c 
-                        WHERE c.ConfigurationName LIKE 'ClientID%' 
+    AND EXISTS (
+        SELECT 1 
+        FROM dbo.ETL_Configuration c 
+        WHERE c.ConfigurationName LIKE 'ClientID%' 
+          AND c.ConfigurationValue = ci.ClientCode
+    )
+ORDER BY ci.ClientCode;
+
                           AND c.ConfigurationValue = ci.ClientCode))
     )
 ORDER BY ci.ClientCode;
