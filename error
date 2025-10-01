@@ -1,77 +1,11 @@
-DECLARE @sql NVARCHAR(MAX);
-DECLARE @DB sysname;
-DECLARE @SourceColExists BIT;
-
--- Step 1: Cursor Setup (same as before, now named curDB2)
-DECLARE curDB2 CURSOR FORWARD_ONLY STATIC
-FOR  
-    SELECT [name]   
-    FROM sys.databases 
-    WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
-      AND name NOT LIKE '%SP'
-      AND name NOT LIKE '%snapshot%'
-      AND name NOT LIKE '%stg'
-      AND name NOT LIKE '%_old'
-      AND state_desc NOT LIKE '%RESTORING%'
-    ORDER BY [name];
-
-OPEN curDB2  
-FETCH NEXT FROM curDB2 INTO @DB  
-
-WHILE @@FETCH_STATUS = 0  
-BEGIN 
-    BEGIN TRY
-        -- Step 4 & 5: Check if ETL_Configuration table exists
-        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
-        BEGIN 
-            -- Check if SourceCode column exists
-            SET @SourceColExists = 0;
-            IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
-                SET @SourceColExists = 1;
-
-            -- Step 6a: Insert all decrypted passwords from ETLTempTable where ftppass IS NOT NULL
-            SET @sql = N'
-            INSERT INTO admindba.dbo.ETLClientInfo (DatabaseName, ClientCode, PasswordHash, pwd)
-            SELECT 
-                DatabaseName,
-                ClientCode,
-                CONVERT(VARBINARY(256), ftppass) AS PasswordHash,
-                ftppass AS pwd
-            FROM admindba.dbo.ETLTempTable
-            WHERE ftppass IS NOT NULL;';
-            EXEC (@sql);
-
-            -- Step 6b: Update remaining columns dynamically
-            SET @sql = N'
-            USE ['+@DB+'];
-            UPDATE e
-            SET 
-                e.FtpUserName = CASE 
-                                    WHEN ' + CASE WHEN @SourceColExists = 1 
-                                                  THEN 'ISNULL(LTRIM(RTRIM(c.SourceCode)), '''') <> ''''' 
-                                                       THEN c.ConfigurationName 
-                                                       ELSE (SELECT TOP 1 ConfigurationValue 
-                                                             FROM dbo.ETL_Configuration 
-                                                             WHERE ConfigurationName LIKE ''ClientID%'')' 
-                                                  ELSE '(SELECT TOP 1 ConfigurationValue 
-                                                         FROM dbo.ETL_Configuration 
-                                                         WHERE ConfigurationName LIKE ''ClientID%'')' 
-                             END + '
-                                END,
-                e.ServerName = CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)),
-                e.IsActive = 1
-            FROM admindba.dbo.ETLClientInfo e
-            JOIN dbo.ETL_Configuration c
-                ON ' + CASE WHEN @SourceColExists = 1 
-                            THEN 'e.ClientCode = c.SourceCode' 
-                            ELSE 'e.ClientCode = c.ConfigurationName' 
-                       END + ';';
-            EXEC (@sql);
-
-        END
-    END TRY
-    BEGIN CATCH
-        PRINT 'Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+Msg 156, Level 15, State 1, Line 136
+Incorrect syntax near the keyword 'THEN'.
+Msg 102, Level 15, State 1, Line 139
+Incorrect syntax near 'ClientID'.
+Msg 102, Level 15, State 1, Line 142
+Incorrect syntax near 'ClientID'.
+Msg 105, Level 15, State 1, Line 158
+Unclosed quotation mark after the character string ' + ERROR_MESSAGE();
     END CATCH
 
     FETCH NEXT FROM curDB2 INTO @DB  
@@ -85,3 +19,6 @@ TRUNCATE TABLE admindba.dbo.ETLTempTable;
 
 -- Step 8: Final verification
 SELECT * FROM admindba.dbo.ETLClientInfo;
+'.
+
+Completion time: 2025-09-30T23:54:02.3360040-04:00
