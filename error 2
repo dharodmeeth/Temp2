@@ -1,57 +1,8 @@
---------------------------------------------------
--- Step 6a: Insert into ETLClientInfo (existing)
---------------------------------------------------
+ConfigurationName	ConfigurationValue
+dbLevel	                22.1.0
 
-;WITH ToInsert AS
-(
-    SELECT 
-        t.DatabaseName,
-        t.ClientCode,
-        CONVERT(VARBINARY(256), t.ftppass) AS PasswordHash,
-        t.ftppass AS pwd,
-        c.ClientName
-    FROM admindba.dbo.ETLTempTable t
-    OUTER APPLY (
-        SELECT TOP 1 c.ClientName
-        FROM admindba.dbo.Client c
-        WHERE c.IsActive = 1
-          AND (
-                -- Match DatabaseName directly
-                c.ClientDBPrefix = t.DatabaseName
-                -- Match DBName without PRD suffix
-                OR c.ClientDBPrefix = CASE 
-                                          WHEN t.DatabaseName LIKE '%PRD' 
-                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
-                                     END
-                -- Match DBName without UAT suffix
-                OR c.ClientDBPrefix = CASE 
-                                          WHEN t.DatabaseName LIKE '%UAT' 
-                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
-                                     END
-              )
-        ORDER BY c.ClientName
-    ) c
-    WHERE t.ftppass IS NOT NULL
-)
-INSERT INTO admindba.dbo.ETLClientInfo
-    (DatabaseName, ClientCode, PasswordHash, pwd, ClientName)
-SELECT 
-    DatabaseName,
-    ClientCode,
-    PasswordHash,
-    pwd,
-    ClientName
-FROM ToInsert;
 
---------------------------------------------------
--- Update ServerName for all records
---------------------------------------------------
-UPDATE admindba.dbo.ETLClientInfo
-SET ServerName = @@SERVERNAME;
+USE BRPLPRD
 
---------------------------------------------------
--- Verification
---------------------------------------------------
-SELECT TOP 50 *
-FROM admindba.dbo.ETLClientInfo
-ORDER BY DatabaseName, ClientCode;
+SELECT *   FROM dbo.ETL_configuration
+where ConfigurationName like '%dblevel%'
