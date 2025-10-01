@@ -1,12 +1,70 @@
--- Insert all ftpPassword entries into ETLTempTable
-SET @sql = N'
-USE ['+@DB+'];
-INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
-SELECT 
-    '''+@DB+''' AS DatabaseName,                -- Current database
-    ConfigurationName AS ClientCode,           -- Use ConfigurationName as ClientCode
-    CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
-        CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
-    )) AS ftppass
-FROM dbo.ETL_Configuration
-WHERE ConfigurationName LIKE ''ftpPassword%'';';
+DECLARE @sql NVARCHAR(MAX), @DBLevel NVARCHAR(250);
+DECLARE @DB sysname;
+
+DECLARE curDB CURSOR FORWARD_ONLY STATIC
+FOR  
+    SELECT [name]   
+    FROM sys.databases 
+    WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+      AND name NOT LIKE '%SP'
+      AND name NOT LIKE '%snapshot%'
+      AND name NOT LIKE '%stg'
+      AND name NOT LIKE '%_old'
+      AND state_desc NOT LIKE '%RESTORING%'
+    ORDER BY [name];
+
+OPEN curDB  
+FETCH NEXT FROM curDB INTO @DB  
+
+WHILE @@FETCH_STATUS = 0  
+BEGIN 
+    BEGIN TRY
+        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+        BEGIN 
+            -- Get ftpUserName (checking DB level)
+            SET @sql = N'SELECT @DBLevel=ConfigurationValue 
+                         FROM ['+@DB+'].dbo.ETL_Configuration 
+                         WHERE ConfigurationName = ''ftpUserName'''; 
+            EXEC sp_executesql @sql, N'@DBLevel NVARCHAR(250) OUTPUT', @DBLevel=@DBLevel OUTPUT;
+
+            IF @DBLevel <> 'ftpUserName'
+            BEGIN 
+                IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'ConfigurationEncrypted') IS NOT NULL
+                BEGIN
+                    -- 1️⃣ Insert decrypted passwords
+                    SET @sql = N'
+                    USE ['+@DB+'];
+                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ftppass)
+                    SELECT 
+                        '''+@DB+''' AS DatabaseName,
+                        CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
+                            CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
+                        )) AS ftppass
+                    FROM dbo.ETL_Configuration
+                    WHERE ConfigurationName LIKE ''ftpPassword%'';';
+                    EXEC (@sql);
+
+                    -- 2️⃣ Insert ClientCode separately
+                    SET @sql = N'
+                    USE ['+@DB+'];
+                    INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode)
+                    SELECT 
+                        '''+@DB+''' AS DatabaseName,
+                        ConfigurationValue AS ClientCode
+                    FROM dbo.ETL_Configuration
+                    WHERE ConfigurationName LIKE ''ftpPassword%'';';
+                    EXEC (@sql);
+
+                END
+            END
+        END
+    END TRY
+    BEGIN CATCH
+        PRINT 'Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+    END CATCH
+
+    FETCH NEXT FROM curDB INTO @DB  
+END  
+
+CLOSE curDB  
+DEALLOCATE curDB;
