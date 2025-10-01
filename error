@@ -21,8 +21,7 @@ BEGIN
     -- Only proceed if ETL_Configuration exists
     IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
     BEGIN 
-        -- Insert all ClientIDs for this database into ETLTempTable
-        -- Decryption will be done separately
+        -- Insert all ClientIDs and encrypted passwords into ETLTempTable
         SET @sql = N'
         INSERT INTO admindba.dbo.ETLTempTable (DBName, ClientID, ConfigurationEncrypted)
         SELECT DISTINCT 
