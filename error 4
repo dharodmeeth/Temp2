@@ -8,8 +8,31 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
+/*
+===================================================================================================
+Procedure Name: dbo.ETL_ClientUpdate
+Description:
+This stored procedure is responsible for updating ETL client information, initializing 
+databases for ETL operations, executing ETL jobs, logging errors, and notifying stakeholders 
+about failed executions. 
 
-ALTER   PROCEDURE [dbo].[ETL_ClientUpdate]
+Detailed Steps:
+1. Step 0: Ensure the ETLFailedLog table exists. This table stores logs for failed or baseline 
+   ETL executions.
+2. Step 1: Clear the columns in ETLClientInfo related to job execution status to prepare for fresh updates.
+3. Step 2: Update ETLClientInfo with the last SQL Agent job run information, including status, message, 
+   and timestamp.
+4. Step 3: Insert a baseline log for all active clients into ETLFailedLog, capturing current state before execution.
+5. Step 4a: Generate and execute dynamic SQL for one-time database initialization for each active client 
+   database, including dropping old keys/certificates and creating new certificates/keys.
+6. Step 4b: Loop through clients that previously failed or have null status and execute ETL-related procedures 
+   (BI_spCreateCertificateKey and BI_spETLConfigurationInsert) and start the associated SQL Agent jobs.
+7. Step 5: Generate an HTML email report for failed or null clients only, including all relevant details, 
+   and send it to the DBA/ETL stakeholders.
+8. Step 6: Cleanup old log entries in ETLFailedLog older than 10 days to maintain table size.
+===================================================================================================
+*/
+ALTER PROCEDURE [dbo].[ETL_ClientUpdate]
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -107,19 +130,19 @@ BEGIN
     DECLARE @InitSQL NVARCHAR(MAX) = N'';
 
     SELECT @InitSQL = STRING_AGG(
-    N'BEGIN TRY
-        USE ' + QUOTENAME(X.DatabaseName) + N';
-        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
-            DROP SYMMETRIC KEY FTPPSWDKey;
-        IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
-            DROP CERTIFICATE CertificateETLFTP;
-        IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
-            DROP MASTER KEY;
-        EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
-    END TRY
-    BEGIN CATCH
-        -- Errors already logged in Step 3
-    END CATCH'
+        CAST(N'BEGIN TRY
+            USE ' + QUOTENAME(X.DatabaseName) + N';
+            IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''FTPPSWDKey'')
+                DROP SYMMETRIC KEY FTPPSWDKey;
+            IF EXISTS (SELECT * FROM sys.certificates WHERE name = ''CertificateETLFTP'')
+                DROP CERTIFICATE CertificateETLFTP;
+            IF EXISTS (SELECT * FROM sys.symmetric_keys WHERE name = ''##MS_DatabaseMasterKey##'')
+                DROP MASTER KEY;
+            EXEC [dbo].[BI_spCreateCertificateKey] @ReturnMessage OUTPUT;
+        END TRY
+        BEGIN CATCH
+            -- Errors already logged in Step 3
+        END CATCH' AS NVARCHAR(MAX))
     , CHAR(13)+CHAR(10))
     FROM (SELECT DISTINCT C.DatabaseName FROM dbo.ETLClientInfo C WHERE C.IsActive = 1) X;
 
@@ -187,7 +210,7 @@ BEGIN
         DECLARE @ServerNames NVARCHAR(MAX);
         DECLARE @subject NVARCHAR(512);
 
-        SELECT @ServerNames = STRING_AGG(L.ServerName, ', ')
+        SELECT @ServerNames = STRING_AGG(CAST(L.ServerName AS NVARCHAR(MAX)), ', ')
         FROM (SELECT DISTINCT L.ServerName FROM dbo.ETLFailedLog L WHERE L.RunID = @RunID AND L.Status <> 'Succeeded') AS L;
 
         SET @body = 
@@ -198,13 +221,15 @@ BEGIN
 <th>JobName</th><th>Message</th><th>Status</th><th>EventDate</th></tr>' +
         (
             SELECT STRING_AGG(
-                N'<tr><td>' + ISNULL(L.ClientCode, '') + N'</td>' +
-                N'<td>' + ISNULL(L.ServerName, '') + N'</td>' +
-                N'<td>' + ISNULL(L.DatabaseName, '') + N'</td>' +
-                N'<td>' + ISNULL(L.JobName, '') + N'</td>' +
-                N'<td>' + ISNULL(L.Message, '') + N'</td>' +
-                N'<td>' + ISNULL(L.Status, '') + N'</td>' +
-                N'<td>' + ISNULL(CONVERT(VARCHAR(20), L.EventDate, 120), '') + N'</td></tr>'
+                CAST(
+                    N'<tr><td>' + ISNULL(L.ClientCode, '') + N'</td>' +
+                    N'<td>' + ISNULL(L.ServerName, '') + N'</td>' +
+                    N'<td>' + ISNULL(L.DatabaseName, '') + N'</td>' +
+                    N'<td>' + ISNULL(L.JobName, '') + N'</td>' +
+                    N'<td>' + ISNULL(L.Message, '') + N'</td>' +
+                    N'<td>' + ISNULL(L.Status, '') + N'</td>' +
+                    N'<td>' + ISNULL(CONVERT(VARCHAR(20), L.EventDate, 120), '') + N'</td></tr>'
+                AS NVARCHAR(MAX))
             , CHAR(13)+CHAR(10))
             FROM dbo.ETLFailedLog L
             WHERE L.RunID = @RunID AND L.Status <> 'Succeeded'
@@ -230,8 +255,3 @@ BEGIN
 
 END
 GO
-
-Msg 9829, Level 16, State 1, Procedure dbo.ETL_ClientUpdate, Line 100 [Batch Start Line 14]
-STRING_AGG aggregation result exceeded the limit of 8000 bytes. Use LOB types to avoid result truncation.
-
-
