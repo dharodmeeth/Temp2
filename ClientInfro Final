@@ -180,7 +180,7 @@ ORDER BY DatabaseName, ClientCode;
 DECLARE @DB sysname;
 DECLARE @sql NVARCHAR(MAX);
 
-DECLARE curDB3 CURSOR FOR
+DECLARE curDB CURSOR FOR
 SELECT DISTINCT DatabaseName
 FROM admindba.dbo.ETLClientInfo;
 
@@ -217,8 +217,8 @@ BEGIN
     FETCH NEXT FROM curDB INTO @DB;
 END
 
-CLOSE curDB3;
-DEALLOCATE curDB3;
+CLOSE curDB;
+DEALLOCATE curDB;
 
 -- Verify results
 SELECT DatabaseName, ClientCode, FtpUserName
