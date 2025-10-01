@@ -1,0 +1,47 @@
+DECLARE @DB sysname;
+DECLARE @sql NVARCHAR(MAX);
+
+DECLARE curDB CURSOR FOR
+SELECT DISTINCT DatabaseName
+FROM admindba.dbo.ETLClientInfo;
+
+OPEN curDB;
+FETCH NEXT FROM curDB INTO @DB;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    BEGIN TRY
+        SET @sql = N'
+            UPDATE ci
+            SET ci.FtpUserName = ftp.ConfigurationValue
+            FROM admindba.dbo.ETLClientInfo ci
+            OUTER APPLY
+            (
+                SELECT TOP 1 c.ConfigurationValue
+                FROM [' + @DB + '].dbo.ETL_Configuration c
+                WHERE c.ConfigurationName = ''ftpUserName''
+                  AND EXISTS (
+                      SELECT 1
+                      FROM [' + @DB + '].dbo.ETL_Configuration cid
+                      WHERE cid.ConfigurationName LIKE ''ClientID%''
+                        AND cid.ConfigurationValue = ci.ClientCode
+                  )
+            ) ftp
+            WHERE ci.DatabaseName = ''' + @DB + ''';';
+
+        EXEC (@sql);
+    END TRY
+    BEGIN CATCH
+        PRINT 'Error updating database: ' + @DB + ' | ' + ERROR_MESSAGE();
+    END CATCH;
+
+    FETCH NEXT FROM curDB INTO @DB;
+END
+
+CLOSE curDB;
+DEALLOCATE curDB;
+
+-- Verify results
+SELECT DatabaseName, ClientCode, FtpUserName
+FROM admindba.dbo.ETLClientInfo
+ORDER BY DatabaseName, ClientCode;
