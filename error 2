@@ -32,3 +32,8 @@ ORDER BY ci.ClientCode;
                           AND c.ConfigurationValue = ci.ClientCode))
     )
 ORDER BY ci.ClientCode;
+
+Msg 156, Level 15, State 1, Line 54
+Incorrect syntax near the keyword 'AND'.
+
+Completion time: 2025-10-01T01:26:08.8126869-04:00
