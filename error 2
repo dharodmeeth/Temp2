@@ -1,1 +1,50 @@
-select * from admindba.dbo.client where isactive=1 order by clientname
+--------------------------------------------------
+-- Step 6a: Insert into ETLClientInfo
+-- Includes ClientName lookup from admindba.dbo.Client
+--------------------------------------------------
+
+;WITH ToInsert AS
+(
+    SELECT 
+        t.DatabaseName,
+        t.ClientCode,
+        CONVERT(VARBINARY(256), t.ftppass) AS PasswordHash,
+        t.ftppass AS pwd,
+        c.ClientName
+    FROM admindba.dbo.ETLTempTable t
+    OUTER APPLY (
+        SELECT TOP 1 c.ClientName
+        FROM admindba.dbo.Client c
+        WHERE c.IsActive = 1
+          AND (
+                -- Match DatabaseName directly
+                c.ClientDBPrefix = t.DatabaseName
+                -- Match DBName without PRD suffix
+                OR c.ClientDBPrefix = CASE 
+                                          WHEN t.DatabaseName LIKE '%PRD' 
+                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
+                                     END
+                -- Match DBName without UAT suffix
+                OR c.ClientDBPrefix = CASE 
+                                          WHEN t.DatabaseName LIKE '%UAT' 
+                                          THEN LEFT(t.DatabaseName, LEN(t.DatabaseName) - 3) 
+                                     END
+              )
+        ORDER BY c.ClientName
+    ) c
+    WHERE t.ftppass IS NOT NULL
+)
+INSERT INTO admindba.dbo.ETLClientInfo
+    (DatabaseName, ClientCode, PasswordHash, pwd, ClientName)
+SELECT 
+    DatabaseName,
+    ClientCode,
+    PasswordHash,
+    pwd,
+    ClientName
+FROM ToInsert;
+
+-- Verification
+SELECT TOP 50 *
+FROM admindba.dbo.ETLClientInfo
+ORDER BY DatabaseName, ClientCode;
