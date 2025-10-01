@@ -11,3 +11,15 @@ BEGIN
       AND ec.SourceCode IS NOT NULL
       AND LTRIM(RTRIM(ec.SourceCode)) <> '';
 END
+
+
+--------------------------
+
+USE BRPLPRD
+
+SELECT *  FROM dbo.ETL_configuration
+where ConfigurationName like '%ftpusername%'
+
+
+Select * from dbo.ETL_configuration
+where ConfigurationName like '%ClientID%'
