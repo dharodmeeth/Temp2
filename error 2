@@ -16,24 +16,21 @@ END
 --------------------------
 USE BRPLPRD;
 
-SELECT ci.ClientCode,
-       ftp.ConfigurationValue AS ftpUserName
+SELECT 
+    ci.ClientCode,
+    ftp.ConfigurationValue AS ftpUserName
 FROM admindba.dbo.ETLClientInfo ci
-LEFT JOIN dbo.ETL_Configuration ftp
-    ON ftp.ConfigurationName = 'ftpUserName'
-    AND EXISTS (
-        SELECT 1 
-        FROM dbo.ETL_Configuration c 
-        WHERE c.ConfigurationName LIKE 'ClientID%' 
-          AND c.ConfigurationValue = ci.ClientCode
-    )
+OUTER APPLY
+(
+    SELECT TOP 1 ConfigurationValue
+    FROM dbo.ETL_Configuration c
+    WHERE c.ConfigurationName = 'ftpUserName'
+      AND EXISTS (
+          SELECT 1
+          FROM dbo.ETL_Configuration cid
+          WHERE cid.ConfigurationName LIKE 'ClientID%'
+            AND cid.ConfigurationValue = ci.ClientCode
+      )
+) ftp
 ORDER BY ci.ClientCode;
 
-                          AND c.ConfigurationValue = ci.ClientCode))
-    )
-ORDER BY ci.ClientCode;
-
-Msg 156, Level 15, State 1, Line 54
-Incorrect syntax near the keyword 'AND'.
-
-Completion time: 2025-10-01T01:26:08.8126869-04:00
