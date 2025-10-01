@@ -1,7 +1,13 @@
 USE BRPLPRD;
 
-SELECT ec.ConfigurationValue AS ftpusername
-FROM dbo.ETL_Configuration ec
-INNER JOIN admindba.dbo.ETLClientInfo ci
-    ON ec.SourceCode = ci.ClientCode
-WHERE ec.ConfigurationName = 'ftpUserName';
+-- Only run if SourceCode column exists
+IF COL_LENGTH('dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
+BEGIN
+    SELECT ec.ConfigurationValue AS ftpusername
+    FROM dbo.ETL_Configuration ec
+    INNER JOIN admindba.dbo.ETLClientInfo ci
+        ON ec.SourceCode = ci.ClientCode
+    WHERE ec.ConfigurationName = 'ftpUserName'
+      AND ec.SourceCode IS NOT NULL
+      AND LTRIM(RTRIM(ec.SourceCode)) <> '';
+END
