@@ -16,18 +16,10 @@ END
 --------------------------
 USE BRPLPRD;
 
--- 1️⃣ Get all FTP usernames
-SELECT ConfigurationName,
-       ConfigurationValue,
-       SourceCode
-FROM dbo.ETL_Configuration
-WHERE ConfigurationName LIKE '%ftpUserName%'
-ORDER BY ConfigurationName;
-
--- 2️⃣ Get all Client IDs
-SELECT ConfigurationName,
-       ConfigurationValue,
-       SourceCode
-FROM dbo.ETL_Configuration
-WHERE ConfigurationName LIKE '%ClientID%'
-ORDER BY ConfigurationName;
+SELECT ec.ConfigurationName,
+       ec.ConfigurationValue AS ftpUserName
+FROM dbo.ETL_Configuration ec
+INNER JOIN admindba.dbo.ETLClientInfo ci
+    ON ec.ConfigurationValue = ci.ClientCode   -- Match ClientCode with ConfigurationValue (ClientID)
+WHERE ec.ConfigurationName LIKE '%ftpUserName%'
+ORDER BY ci.ClientCode;
