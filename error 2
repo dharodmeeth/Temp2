@@ -1,4 +1,6 @@
-USE BRPLPRD
+USE BRPLPRD;
 
-SELECT *   FROM dbo.ETL_configuration
-where ConfigurationName like '%ftpusername%'
+SELECT ec.*
+FROM dbo.ETL_Configuration ec
+INNER JOIN admindba.dbo.ETLClientInfo ci
+    ON ec.SourceCode = ci.ClientCode;
