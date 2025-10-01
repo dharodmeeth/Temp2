@@ -1,7 +1,9 @@
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @DB sysname;
+DECLARE @DBLevel NVARCHAR(250);
 DECLARE @SourceColExists BIT;
 
+-- Step 1: Populate ETLTempTable
 DECLARE curDB CURSOR FORWARD_ONLY STATIC
 FOR  
     SELECT [name]   
@@ -20,15 +22,12 @@ FETCH NEXT FROM curDB INTO @DB
 WHILE @@FETCH_STATUS = 0  
 BEGIN 
     BEGIN TRY
-        -- Check if ETL_Configuration table exists in this database
         IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
         BEGIN 
-            -- Check if SourceCode column exists
             SET @SourceColExists = 0;
             IF COL_LENGTH('['+@DB+'].dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
                 SET @SourceColExists = 1;
 
-            -- Build dynamic insert query
             SET @sql = N'
             USE ['+@DB+'];
             WITH FtpPasswords AS
@@ -49,9 +48,9 @@ BEGIN
                         THEN 'CASE 
                                   WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
                                   THEN SourceCode 
-                                  ELSE (SELECT ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') 
+                                  ELSE (SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') 
                               END AS ClientCode'
-                        ELSE '(SELECT ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
+                        ELSE '(SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
                     END + ',
                     ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
                 FROM dbo.ETL_Configuration
@@ -64,12 +63,12 @@ BEGIN
                 f.ftppass
             FROM FtpPasswords f
             JOIN ClientCodes c ON f.rn = c.rn;';
-
+            
             EXEC (@sql);
         END
     END TRY
     BEGIN CATCH
-        --PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+        PRINT ''Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
     END CATCH
 
     FETCH NEXT FROM curDB INTO @DB  
@@ -78,30 +77,23 @@ END
 CLOSE curDB  
 DEALLOCATE curDB;
 
-	Select * from ETLTempTable
-	where ftppass Is Not Null
+-- Step 2: Merge into ETLClientInfo
+DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
+   SELECT [name]   
+   FROM sys.databases
+   WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
+     AND name NOT LIKE '%SP'
+     AND name NOT LIKE '%snapshot%'
+     AND name NOT LIKE '%stg'
+   ORDER BY [name];
 
---tRUNCATE tABLE ETLTempTable
+OPEN curDB2  
+FETCH NEXT FROM curDB2 INTO @DB  
 
-
---------------------------------------------------------------------
-   -- Step 3: Merge data into ETLClientInfo with ClientName directly from dbo.Client
---------------------------------------------------------------------
-    DECLARE curDB2 CURSOR FORWARD_ONLY STATIC FOR  
-       SELECT [name]   
-       FROM master..sysdatabases 
-       WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
-         AND name NOT LIKE '%SP'
-         AND name NOT LIKE '%snapshot%'
-         AND name NOT LIKE '%stg'
-       ORDER BY [name];
-
-    OPEN curDB2  
-    FETCH NEXT FROM curDB2 INTO @DB  
-
-    WHILE @@FETCH_STATUS = 0  
-    BEGIN
-        IF OBJECT_ID(N'['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
+WHILE @@FETCH_STATUS = 0  
+BEGIN
+    BEGIN TRY
+        IF OBJECT_ID('['+@DB+'].dbo.ETL_Configuration') IS NOT NULL  
         BEGIN 
             -- Get dbLevel
             SET @sql = N'SELECT @DBLevel=ConfigurationValue 
@@ -113,40 +105,22 @@ DEALLOCATE curDB;
 
             IF @DBLevel IS NOT NULL
             BEGIN 
-                -- Merge into ETLClientInfo with ClientName from dbo.Client
-                SET @sql=N'
+                -- Merge into ETLClientInfo
+                SET @sql = N'
                 MERGE admindba.dbo.ETLClientInfo AS target
                 USING (
                     SELECT *
                     FROM (
                         SELECT
-                            (SELECT TOP 1 ConfigurationValue 
-                             FROM ['+@DB+'].dbo.ETL_Configuration 
-                             WHERE ConfigurationName = ''ClientID'') AS ClientCode,
-
-                            (SELECT TOP 1 ConfigurationValue 
-                             FROM ['+@DB+'].dbo.ETL_Configuration 
-                             WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
-
-                            (SELECT TOP 1 ftppass 
-                             FROM admindba.dbo.ETLTempTable 
-                             WHERE dbname = '''+@DB+''') AS pwd,
-
-                            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) 
-                             FROM admindba.dbo.ETLTempTable 
-                             WHERE dbname = '''+@DB+''') AS PasswordHash,
-
+                            (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ClientID'') AS ClientCode,
+                            (SELECT TOP 1 ConfigurationValue FROM ['+@DB+'].dbo.ETL_Configuration WHERE ConfigurationName = ''ftpUserName'') AS FtpUserName,
+                            (SELECT TOP 1 ftppass FROM admindba.dbo.ETLTempTable WHERE DatabaseName = '''+@DB+''') AS pwd,
+                            (SELECT TOP 1 CONVERT(VARBINARY(256), ftppass) FROM admindba.dbo.ETLTempTable WHERE DatabaseName = '''+@DB+''') AS PasswordHash,
                             '''+@DBLevel+''' AS EtlVersion,
-
                             '''+@DB+''' AS DatabaseName,
                             CAST(SERVERPROPERTY(''MachineName'') AS NVARCHAR(200)) AS ServerName,
-
-                            (SELECT c.ClientName
-                             FROM admindba.dbo.Client c
-                             WHERE c.IsActive = 1
-                               AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix
-                            ) AS ClientName,
-
+                            (SELECT TOP 1 c.ClientName FROM admindba.dbo.Client c
+                             WHERE c.IsActive = 1 AND LEFT('''+@DB+''', LEN(c.ClientDBPrefix)) = c.ClientDBPrefix) AS ClientName,
                             SYSUTCDATETIME() AS EventDate,
                             1 AS IsActive
                     ) AS src
@@ -167,23 +141,23 @@ DEALLOCATE curDB;
                 WHEN NOT MATCHED THEN
                     INSERT (ClientCode, FtpUserName, pwd, PasswordHash, EtlVersion, DatabaseName, ServerName, ClientName, EventDate, IsActive)
                     VALUES (source.ClientCode, source.FtpUserName, source.pwd, source.PasswordHash, source.EtlVersion, source.DatabaseName, source.ServerName, source.ClientName, source.EventDate, source.IsActive);';
-                
+
                 EXEC (@sql);
             END
         END
-        FETCH NEXT FROM curDB2 INTO @DB
-    END
+    END TRY
+    BEGIN CATCH
+        PRINT 'Error processing database: ' + @DB + ' | ' + ERROR_MESSAGE();
+    END CATCH
 
-    CLOSE curDB2
-    DEALLOCATE curDB2;
-
-    -- Optional: truncate staging table at end to keep it empty
-    TRUNCATE TABLE admindba.dbo.ETLTempTable;
+    FETCH NEXT FROM curDB2 INTO @DB
 END
-GO
 
+CLOSE curDB2
+DEALLOCATE curDB2;
 
+-- Optional: truncate staging table at end
+TRUNCATE TABLE admindba.dbo.ETLTempTable;
 
-	Select * from ETLClientInfo
-
---tRUNCATE tABLE ETLClientInfo
+-- Final select for verification
+SELECT * FROM admindba.dbo.ETLClientInfo;
