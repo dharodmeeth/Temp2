@@ -1,3 +1,70 @@
+USE [ADMINDBA];
+GO
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+/*
+===================================================================================================
+Procedure Name: ETL_ClientInfo
+Description:
+1. Creates ETLClientInfo table if it does not exist.
+2. Creates a permanent staging table ETLTempTable if missing.
+3. Collects FTP passwords from all user databases and stages them.
+4. Updates existing clients or inserts new clients into ETLClientInfo.
+5. Truncates the staging table at the end.
+Owner: Meeth Dharod
+Created On: 30-Sep-2025
+===================================================================================================
+*/
+Create Or Alter PROCEDURE dbo.ETL_ClientInfo
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+	 --------------------------------------------------------------------
+    -- Step 0: Create ETLClientInfo table if it does not exist
+    --------------------------------------------------------------------
+    IF OBJECT_ID('dbo.ETLClientInfo', 'U') IS NULL
+    BEGIN
+
+CREATE TABLE [dbo].[ETLClientInfo](
+	[ClientCode] [varchar](50) NULL,
+	[ClientName] [nvarchar](200) NULL,
+	[DatabaseName] [nvarchar](200) NULL,
+	[ServerName] [nvarchar](200) NULL,
+	[FtpUserName] [nvarchar](150) NULL,
+	[PasswordHash] [varbinary](256) NULL,
+	[EtlVersion] [nvarchar](50) NULL,
+	[IsActive] [bit] NOT NULL,
+	[JobName] [nvarchar](200) NULL,
+	[Message] [nvarchar](max) NULL,
+	[EventDate] [datetime2](0) NULL,
+	[Status] [nvarchar](50) NULL,
+	[Pwd] [nvarchar](200) NULL
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive];
+ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate];
+
+ END
+--------------------------------------------------------------------
+    -- Step 1: Create permanent staging table if it does not exist
+--------------------------------------------------------------------
+    IF OBJECT_ID('admindba.dbo.ETLTempTable','U') IS NULL
+    BEGIN
+        CREATE TABLE admindba.dbo.ETLTempTable
+        (
+            dbname  VARCHAR(100)NULL,
+	ClientCode nvarchar(200) NULL,
+            ftppass NVARCHAR(256) NULL
+        );
+    END
+
+    -- Clear staging table before starting
+    TRUNCATE TABLE admindba.dbo.ETLTempTable; 
 ----------------------------------------------------
 -- Combined ETL Script
 ----------------------------------------------------
@@ -184,11 +251,13 @@ DEALLOCATE curDB3
 ----------------------------------------------------
 -- Final verification
 ----------------------------------------------------
-SELECT DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName
-FROM admindba.dbo.ETLClientInfo
-ORDER BY DatabaseName, ClientCode
+--SELECT DatabaseName, ClientCode, FtpUserName, EtlVersion, ServerName
+--FROM admindba.dbo.ETLClientInfo
+--ORDER BY DatabaseName, ClientCode
 
 ----------------------------------------------------
 -- Optional: Cleanup staging table
 ----------------------------------------------------
-TRUNCATE TABLE admindba.dbo.ETLTempTable
+TRUNCATE TABLE admindba.dbo.ETLTempTable;
+END
+GO
