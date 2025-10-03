@@ -1,20 +1,4 @@
-USE [ADMINDBA]
-GO
-
-/****** Object:  StoredProcedure [dbo].[DBA_ETLSQLagentJobCheck_report]    Script Date: 10/3/2025 9:24:34 AM ******/
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-
-
-
-
-
-
-CREATE           PROCEDURE [dbo].[DBA_ETLSQLagentJobCheck_report] 
+ALTER PROCEDURE [dbo].[DBA_ETLSQLagentJobCheck_report] 
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -22,11 +6,11 @@ BEGIN
     DECLARE 
         @htmltable NVARCHAR(MAX),
         @MailProfile VARCHAR(50), 
-        @SubjectLine NVARCHAR(255)
+        @SubjectLine NVARCHAR(255);
 
     -- Get mail profile
-    SELECT @MailProfile = [name] FROM msdb..sysmail_profile
-    SELECT @SubjectLine = 'ETL Job Report For V1WBSINVSQ07L1' --Change the Email Subject Line here
+    SELECT TOP 1 @MailProfile = [name] FROM msdb..sysmail_profile;
+    SELECT @SubjectLine = 'ETL Job Report For V1WBSINVSQ07L1';
 
     -- Build the HTML table header
     SET @htmltable = 
@@ -35,58 +19,41 @@ BEGIN
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>SQL Agent Job Check</title>
         <style>
-            body {
-                font-family: Arial, sans-serif;
-                font-size: 10pt;
-                background-color: #F5F5F5;
-                margin: 20px;
-            }
-            table {
-                width: 100%;
-                border: 1px solid black;
-                border-collapse: collapse;
-                background-color: #DCDFDF;
-                text-align: center;
-            }
-            th {
-                border: 1px solid white;
-                background-color: #7FB1B3;
-                padding: 10px;
-                color: white;
-                font-weight: bold;
-            }
-            td {
-                border: 1px solid black;
-                padding: 8px;
-            }
+            body { font-family: Arial, sans-serif; font-size: 10pt; background-color: #F5F5F5; margin: 20px; }
+            table { width: 100%; border: 1px solid black; border-collapse: collapse; background-color: #DCDFDF; text-align: center; }
+            th { border: 1px solid white; background-color: #7FB1B3; padding: 10px; color: white; font-weight: bold; }
+            td { border: 1px solid black; padding: 8px; }
         </style>
     </head>
     <body>
-
     <h2>ETL Job Report For V1WBSINVSQ07L1</h2>
-
     <table>
         <tr>
             <th>Job Name</th>
             <th>Message</th>
             <th>Date</th>
             <th>Status</th>
-        </tr>'
+        </tr>';
 
-    -- Append job execution details as rows
+    ;WITH LastRun AS (
+        SELECT 
+            job_id,
+            MAX(CONVERT(DATETIME, RTRIM(run_date)) + 
+                (run_time / 10000) * (1.0/24) + 
+                ((run_time % 10000) / 100) * (1.0/1440) + 
+                (run_time % 100) * (1.0/86400)) AS LastRunDateTime
+        FROM msdb..sysjobhistory
+        WHERE step_id = 0
+        GROUP BY job_id
+    )
     SELECT @htmltable = @htmltable + 
     STRING_AGG(
         '<tr>
             <td>' + CAST(SJ.name as varchar(max)) + '</td>
             <td>' + SJH.message + '</td>
-            <td>' + CONVERT(VARCHAR, DATEADD(S, 
-                (run_time / 10000) * 60 * 60 + 
-                ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
-                (run_time - (run_time / 100) * 100), 
-                CONVERT(DATETIME, RTRIM(run_date), 113)), 100) + '</td>
+            <td>' + CONVERT(VARCHAR, LastRun.LastRunDateTime, 100) + '</td>
             <td>' + 
                 CASE 
                     WHEN SJH.run_status = 0 THEN 'Failed'
@@ -99,22 +66,16 @@ BEGIN
         </tr>', 
         ''
     )
-    FROM msdb..sysjobhistory SJH  
+    FROM LastRun
+    JOIN msdb..sysjobhistory SJH 
+        ON LastRun.job_id = SJH.job_id
+       AND LastRun.LastRunDateTime = CONVERT(DATETIME, RTRIM(SJH.run_date)) + 
+            (run_time / 10000) * (1.0/24) + 
+            ((run_time % 10000) / 100) * (1.0/1440) + 
+            (run_time % 100) * (1.0/86400)
     JOIN msdb..sysjobs SJ ON SJH.job_id = SJ.job_id  
-    WHERE step_id = 0  
-	AND SJ.name like 'DXRA%'									
---(													-- ADD SQL Agent Job Name Here which needs to be Monitored
---'DXRA22.1 database GCPLPRD  EXTRACT (C130372)',
---'DXRA22.1 database JTCPRD  EXTRACT (C138800)',
---'DXRA22.1 database TBCPPRD  EXTRACT (C47883)',
---'DXRA22.1 database ULPPRD  EXTRACT (C47776)',
---'DXRA22.1 database CPALPRD  EXTRACT (C11292)'
---)
-    AND DATEADD(S,  
-        (run_time / 10000) * 60 * 60 + 
-        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
-        (run_time - (run_time / 100) * 100),  
-        CONVERT(DATETIME, RTRIM(run_date), 113)) >= DATEADD(DAY, -1, GETDATE());
+    WHERE SJ.name LIKE 'DXRA%'  
+      AND SJH.step_id = 0;
 
     -- Close the HTML table
     SET @htmltable = @htmltable + 
@@ -126,11 +87,9 @@ BEGIN
     -- Send email
     EXEC msdb.dbo.sp_send_dbmail 
         @profile_name = @MailProfile,
-        @recipients = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com', --Add the email ID here if this report needs to be send to anyone else.
+        @recipients = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
         @subject = @SubjectLine,
         @body = @htmltable,
         @body_format = 'HTML';
 END
 GO
-
-
