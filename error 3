@@ -1,259 +1,95 @@
-USE [ADMINDBA];
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-/*
-===================================================================================================
-Procedure Name: dbo.ETL_ClientInfo
-Description:
-1. Creates ETLClientInfo table if it does not exist.
-2. Creates a permanent staging table ETLTempTable if missing.
-3. Collects FTP passwords from all user databases and stages them.
-4. Inserts **only new clients** into ETLClientInfo.
-5. Updates ServerName, EtlVersion, and FtpUserName for all clients.
-6. Clears the staging table at the end.
-
-Owner: Meeth Dharod
-Created On: 30-Sep-2025
-===================================================================================================
-*/
-CREATE OR ALTER PROCEDURE dbo.ETL_ClientInfo
+ALTER PROCEDURE [dbo].[DBA_ETLSQLagentJobCheck_report] 
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    --------------------------------------------------------------------
-    -- Step 0: Create ETLClientInfo table if it does not exist
-    --------------------------------------------------------------------
-    IF OBJECT_ID('dbo.ETLClientInfo', 'U') IS NULL
-    BEGIN
-        CREATE TABLE [dbo].[ETLClientInfo](
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-              NULL,
-            [IsActive] [bit] NOT NULL,
-              NULL,
-            [Message] [nvarchar](max) NULL,
-              NULL,
-              NULL,
-              NULL
-        ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY];
+    DECLARE 
+        @htmltable NVARCHAR(MAX),
+        @MailProfile VARCHAR(50), 
+        @SubjectLine NVARCHAR(255);
 
-        ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT ((1)) FOR [IsActive];
-        ALTER TABLE [dbo].[ETLClientInfo] ADD  DEFAULT (sysutcdatetime()) FOR [EventDate];
-    END
+    -- Get mail profile
+    SELECT TOP 1 @MailProfile = [name] FROM msdb..sysmail_profile;
+    SELECT @SubjectLine = 'ETL Job Report For V1WBSINVSQ07L1';
 
-    --------------------------------------------------------------------
-    -- Step 1: Create permanent staging table if it does not exist
-    --------------------------------------------------------------------
-    IF OBJECT_ID('admindba.dbo.ETLTempTable','U') IS NULL
-    BEGIN
-        CREATE TABLE admindba.dbo.ETLTempTable
-        (
-            DatabaseName  VARCHAR(100) NULL,
-            ClientCode    NVARCHAR(200) NULL,
-            ftppass       NVARCHAR(256) NULL
-        );
-    END
+    -- Build the HTML table header
+    SET @htmltable = 
+    N'
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>SQL Agent Job Check</title>
+        <style>
+            body { font-family: Arial, sans-serif; font-size: 10pt; background-color: #F5F5F5; margin: 20px; }
+            table { width: 100%; border: 1px solid black; border-collapse: collapse; background-color: #DCDFDF; text-align: center; }
+            th { border: 1px solid white; background-color: #7FB1B3; padding: 10px; color: white; font-weight: bold; }
+            td { border: 1px solid black; padding: 8px; }
+        </style>
+    </head>
+    <body>
+    <h2>ETL Job Report For V1WBSINVSQ07L1</h2>
+    <table>
+        <tr>
+            <th>Job Name</th>
+            <th>Message</th>
+            <th>Date</th>
+            <th>Status</th>
+        </tr>';
 
-    -- Clear staging table before starting
-    TRUNCATE TABLE admindba.dbo.ETLTempTable;
-
-    --------------------------------------------------------------------
-    -- Step 2: Populate ETLTempTable with FTP passwords from all user databases
-    --------------------------------------------------------------------
-    DECLARE @sql NVARCHAR(MAX);
-    DECLARE @DB sysname;
-    DECLARE @SourceColExists BIT;
-
-    DECLARE curDB1 CURSOR FORWARD_ONLY STATIC
-    FOR  
-        SELECT [name]   
-        FROM sys.databases 
-        WHERE [name] NOT IN ('master','model','msdb','tempdb','DefaultDB','admindba','iws_admin') 
-          AND name NOT LIKE '%SP'
-          AND name NOT LIKE '%snapshot%'
-          AND name NOT LIKE '%stg'
-          AND name NOT LIKE '%_old'
-          AND state_desc NOT LIKE '%RESTORING%'
-        ORDER BY [name];
-
-    OPEN curDB1
-    FETCH NEXT FROM curDB1 INTO @DB
-
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        BEGIN TRY
-            IF OBJECT_ID('[' + @DB + '].dbo.ETL_Configuration') IS NOT NULL
-            BEGIN
-                SET @SourceColExists = 0;
-                IF COL_LENGTH('[' + @DB + '].dbo.ETL_Configuration', 'SourceCode') IS NOT NULL
-                    SET @SourceColExists = 1;
-
-                SET @sql = N'
-                USE [' + @DB + '];
-                WITH FtpPasswords AS
-                (
-                    SELECT ConfigurationName,
-                           CONVERT(NVARCHAR(MAX), DECRYPTBYKEYAUTOCERT(
-                               CERT_ID(''CertificateETLFTP''), NULL, ConfigurationEncrypted
-                           )) AS ftppass,
-                           ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
-                    FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ftpPassword%''
-                ),
-                ClientCodes AS
-                (
-                    SELECT ' + 
-                        CASE WHEN @SourceColExists = 1
-                            THEN 'CASE WHEN SourceCode IS NOT NULL AND LTRIM(RTRIM(SourceCode)) <> '''' 
-                                      THEN SourceCode 
-                                      ELSE (SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') 
-                                  END AS ClientCode'
-                            ELSE '(SELECT TOP 1 ConfigurationValue FROM dbo.ETL_Configuration WHERE ConfigurationName LIKE ''ClientID%'') AS ClientCode'
-                        END + ',
-                           ROW_NUMBER() OVER (ORDER BY ConfigurationName) AS rn
-                    FROM dbo.ETL_Configuration
-                    WHERE ConfigurationName LIKE ''ftpPassword%''
-                )
-                INSERT INTO admindba.dbo.ETLTempTable (DatabaseName, ClientCode, ftppass)
-                SELECT ''' + @DB + ''' AS DatabaseName, c.ClientCode, f.ftppass
-                FROM FtpPasswords f
-                JOIN ClientCodes c ON f.rn = c.rn;'
-
-                EXEC(@sql)
-            END
-        END TRY
-        BEGIN CATCH
-            PRINT 'Error in database: ' + @DB + ' | ' + ERROR_MESSAGE()
-        END CATCH
-
-        FETCH NEXT FROM curDB1 INTO @DB
-    END
-
-    CLOSE curDB1
-    DEALLOCATE curDB1
-
-    --------------------------------------------------------------------
-    -- Step 3: Insert only new records into ETLClientInfo with ClientName
-    --------------------------------------------------------------------
-    ;WITH ToInsert AS
-    (
-        SELECT t.DatabaseName,
-               t.ClientCode,
-               CONVERT(VARBINARY(256), t.ftppass) AS PasswordHash,
-               t.ftppass AS pwd,
-               c.ClientName
-        FROM admindba.dbo.ETLTempTable t
-        OUTER APPLY (
-            SELECT TOP 1 c.ClientName
-            FROM admindba.dbo.Client c
-            WHERE c.IsActive = 1
-              AND (
-                    c.ClientDBPrefix = t.DatabaseName
-                    OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%PRD' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName)-3) END
-                    OR c.ClientDBPrefix = CASE WHEN t.DatabaseName LIKE '%UAT' THEN LEFT(t.DatabaseName, LEN(t.DatabaseName)-3) END
-                  )
-            ORDER BY c.ClientName
-        ) c
-        WHERE t.ftppass IS NOT NULL
+    ;WITH JobRuns AS (
+        SELECT 
+            SJ.name,
+            SJH.message,
+            RunDateTime = CONVERT(DATETIME, RTRIM(SJH.run_date)) + 
+                          (SJH.run_time / 10000) * (1.0/24) + 
+                          ((SJH.run_time % 10000) / 100) * (1.0/1440) + 
+                          (SJH.run_time % 100) * (1.0/86400),
+            SJH.run_status
+        FROM msdb..sysjobhistory SJH
+        JOIN msdb..sysjobs SJ 
+            ON SJH.job_id = SJ.job_id  
+        WHERE SJH.step_id = 0
+          AND SJ.name LIKE 'DXRA%'
     )
-    INSERT INTO admindba.dbo.ETLClientInfo (DatabaseName, ClientCode, PasswordHash, pwd, ClientName)
-    SELECT ti.DatabaseName, ti.ClientCode, ti.PasswordHash, ti.pwd, ti.ClientName
-    FROM ToInsert ti
-    LEFT JOIN admindba.dbo.ETLClientInfo ci
-           ON ci.DatabaseName = ti.DatabaseName
-          AND ci.ClientCode = ti.ClientCode
-    WHERE ci.ClientCode IS NULL;  -- insert only if not already present
+    , LastRun AS (
+        SELECT TOP 1 *
+        FROM JobRuns
+        ORDER BY RunDateTime DESC
+    )
+    SELECT @htmltable = @htmltable + 
+    STRING_AGG(
+        '<tr>
+            <td>' + CAST(name as varchar(max)) + '</td>
+            <td>' + message + '</td>
+            <td>' + CONVERT(VARCHAR, RunDateTime, 100) + '</td>
+            <td>' + 
+                CASE 
+                    WHEN run_status = 0 THEN 'Failed'
+                    WHEN run_status = 1 THEN 'Succeeded'
+                    WHEN run_status = 2 THEN 'Retry'
+                    WHEN run_status = 3 THEN 'Cancelled'
+                    ELSE 'Unknown'
+                END
+            + '</td>
+        </tr>', 
+        ''
+    )
+    FROM LastRun;
 
-    --------------------------------------------------------------------
-    -- Step 4: Update ServerName and EtlVersion for all records
-    --------------------------------------------------------------------
-    DECLARE curDB2 CURSOR FOR
-    SELECT DISTINCT DatabaseName
-    FROM admindba.dbo.ETLClientInfo;
+    -- Close the HTML table
+    SET @htmltable = @htmltable + 
+    N'
+    </table>
+    </body>
+    </html>';
 
-    OPEN curDB2
-    FETCH NEXT FROM curDB2 INTO @DB
-
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        BEGIN TRY
-            SET @sql = N'
-            UPDATE admindba.dbo.ETLClientInfo
-            SET ServerName = @@SERVERNAME,
-                EtlVersion = (SELECT TOP 1 ConfigurationValue 
-                              FROM [' + @DB + '].dbo.ETL_Configuration
-                              WHERE ConfigurationName = ''dbLevel'')
-            WHERE DatabaseName = ''' + @DB + ''''
-
-            EXEC(@sql)
-        END TRY
-        BEGIN CATCH
-            PRINT 'Error updating EtlVersion/ServerName for database: ' + @DB + ' | ' + ERROR_MESSAGE()
-        END CATCH
-
-        FETCH NEXT FROM curDB2 INTO @DB
-    END
-
-    CLOSE curDB2
-    DEALLOCATE curDB2
-
-    --------------------------------------------------------------------
-    -- Step 5: Update FtpUserName for all records
-    --------------------------------------------------------------------
-    DECLARE curDB3 CURSOR FOR
-    SELECT DISTINCT DatabaseName
-    FROM admindba.dbo.ETLClientInfo;
-
-    OPEN curDB3
-    FETCH NEXT FROM curDB3 INTO @DB
-
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        BEGIN TRY
-            SET @sql = N'
-            UPDATE ci
-            SET ci.FtpUserName = ftp.ConfigurationValue
-            FROM admindba.dbo.ETLClientInfo ci
-            OUTER APPLY
-            (
-                SELECT TOP 1 c.ConfigurationValue
-                FROM [' + @DB + '].dbo.ETL_Configuration c
-                WHERE c.ConfigurationName = ''ftpUserName''
-                  AND EXISTS (
-                      SELECT 1
-                      FROM [' + @DB + '].dbo.ETL_Configuration cid
-                      WHERE cid.ConfigurationName LIKE ''ClientID%''
-                        AND cid.ConfigurationValue = ci.ClientCode
-                  )
-            ) ftp
-            WHERE ci.DatabaseName = ''' + @DB + ''';'
-
-            EXEC(@sql)
-        END TRY
-        BEGIN CATCH
-            PRINT 'Error updating FtpUserName for database: ' + @DB + ' | ' + ERROR_MESSAGE()
-        END CATCH
-
-        FETCH NEXT FROM curDB3 INTO @DB
-    END
-
-    CLOSE curDB3
-    DEALLOCATE curDB3
-
-    --------------------------------------------------------------------
-    -- Step 6: Cleanup staging table
-    --------------------------------------------------------------------
-    TRUNCATE TABLE admindba.dbo.ETLTempTable;
-
+    -- Send email
+    EXEC msdb.dbo.sp_send_dbmail 
+        @profile_name = @MailProfile,
+        @recipients = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
+        @subject = @SubjectLine,
+        @body = @htmltable,
+        @body_format = 'HTML';
 END
 GO
