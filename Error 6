@@ -1,0 +1,136 @@
+USE [ADMINDBA]
+GO
+
+/****** Object:  StoredProcedure [dbo].[DBA_ETLSQLagentJobCheck_report]    Script Date: 10/3/2025 9:24:34 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+
+
+
+
+CREATE           PROCEDURE [dbo].[DBA_ETLSQLagentJobCheck_report] 
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE 
+        @htmltable NVARCHAR(MAX),
+        @MailProfile VARCHAR(50), 
+        @SubjectLine NVARCHAR(255)
+
+    -- Get mail profile
+    SELECT @MailProfile = [name] FROM msdb..sysmail_profile
+    SELECT @SubjectLine = 'ETL Job Report For V1WBSINVSQ07L1' --Change the Email Subject Line here
+
+    -- Build the HTML table header
+    SET @htmltable = 
+    N'
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SQL Agent Job Check</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                font-size: 10pt;
+                background-color: #F5F5F5;
+                margin: 20px;
+            }
+            table {
+                width: 100%;
+                border: 1px solid black;
+                border-collapse: collapse;
+                background-color: #DCDFDF;
+                text-align: center;
+            }
+            th {
+                border: 1px solid white;
+                background-color: #7FB1B3;
+                padding: 10px;
+                color: white;
+                font-weight: bold;
+            }
+            td {
+                border: 1px solid black;
+                padding: 8px;
+            }
+        </style>
+    </head>
+    <body>
+
+    <h2>ETL Job Report For V1WBSINVSQ07L1</h2>
+
+    <table>
+        <tr>
+            <th>Job Name</th>
+            <th>Message</th>
+            <th>Date</th>
+            <th>Status</th>
+        </tr>'
+
+    -- Append job execution details as rows
+    SELECT @htmltable = @htmltable + 
+    STRING_AGG(
+        '<tr>
+            <td>' + CAST(SJ.name as varchar(max)) + '</td>
+            <td>' + SJH.message + '</td>
+            <td>' + CONVERT(VARCHAR, DATEADD(S, 
+                (run_time / 10000) * 60 * 60 + 
+                ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
+                (run_time - (run_time / 100) * 100), 
+                CONVERT(DATETIME, RTRIM(run_date), 113)), 100) + '</td>
+            <td>' + 
+                CASE 
+                    WHEN SJH.run_status = 0 THEN 'Failed'
+                    WHEN SJH.run_status = 1 THEN 'Succeeded'
+                    WHEN SJH.run_status = 2 THEN 'Retry'
+                    WHEN SJH.run_status = 3 THEN 'Cancelled'
+                    ELSE 'Unknown'
+                END
+            + '</td>
+        </tr>', 
+        ''
+    )
+    FROM msdb..sysjobhistory SJH  
+    JOIN msdb..sysjobs SJ ON SJH.job_id = SJ.job_id  
+    WHERE step_id = 0  
+	AND SJ.name like 'DXRA%'									
+--(													-- ADD SQL Agent Job Name Here which needs to be Monitored
+--'DXRA22.1 database GCPLPRD  EXTRACT (C130372)',
+--'DXRA22.1 database JTCPRD  EXTRACT (C138800)',
+--'DXRA22.1 database TBCPPRD  EXTRACT (C47883)',
+--'DXRA22.1 database ULPPRD  EXTRACT (C47776)',
+--'DXRA22.1 database CPALPRD  EXTRACT (C11292)'
+--)
+    AND DATEADD(S,  
+        (run_time / 10000) * 60 * 60 + 
+        ((run_time - (run_time / 10000) * 10000) / 100) * 60 + 
+        (run_time - (run_time / 100) * 100),  
+        CONVERT(DATETIME, RTRIM(run_date), 113)) >= DATEADD(DAY, -1, GETDATE());
+
+    -- Close the HTML table
+    SET @htmltable = @htmltable + 
+    N'
+    </table>
+    </body>
+    </html>';
+
+    -- Send email
+    EXEC msdb.dbo.sp_send_dbmail 
+        @profile_name = @MailProfile,
+        @recipients = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com', --Add the email ID here if this report needs to be send to anyone else.
+        @subject = @SubjectLine,
+        @body = @htmltable,
+        @body_format = 'HTML';
+END
+GO
+
+
