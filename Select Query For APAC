@@ -1,26 +1,97 @@
-[dbo].[INV_BusinessEventTemplate](
-	[BusinessEventTemplateID] [int] IDENTITY(1,1) NOT NULL,
-	[BusinessEventTemplateName] [nvarchar](50) NOT NULL,
-	[Descriptor] [nvarchar](max) NULL,
-	[ConfigurationData] [varbinary](max) NULL,
-	[TypeID] [int] NULL,
-	[StateID] [int] NOT NULL,
-	[EntityTypeId] [int] NULL,
-	[UniqueId] [uniqueidentifier] NOT NULL,
-	[Author] [nvarchar](200) NULL,
-	[CreatedOn] [datetime] NOT NULL,
-	[Description] [nvarchar](max) NULL,
-	[CreatedBy] [nvarchar](128) NOT NULL,
-	[CreatedDate] [datetime] NOT NULL,
-	[ChangedBy] [nvarchar](128) NOT NULL,
-	[ChangedDate] [datetime] NOT NULL,
-	[AlternateName] [nvarchar](50) NULL,
-	[MakerCheckerStatus] [bit] NOT NULL,
-	[Version] [int] NOT NULL,
-	[SafeCode] [bit] NOT NULL,
-	[UserInterfaceCodeFileId] [int] NULL,
-	[ExecutionCodeFileId] [int] NULL,
-	[ApiVersion] [nvarchar](20) NOT NULL,
-	[UserInterfaceCodeVersion] [int] NULL,
-	[ExecutionCodeVersion] [int] NULL,
-	[ProcessURL]  AS ([dbo].[BE_fnProcessURL]([Descriptor],[EntityTypeID])) PERSISTED,
+DECLARE @DBName NVARCHAR(128);
+DECLARE @SQL NVARCHAR(MAX);
+
+-- Drop and recreate temp result table
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
+
+CREATE TABLE #Results
+(
+    DatabaseName SYSNAME,
+    BusinessEventTemplateID INT,
+    BusinessEventTemplateName NVARCHAR(50),
+    Descriptor NVARCHAR(MAX),
+    ConfigurationData VARBINARY(MAX),
+    TypeID INT,
+    StateID INT,
+    EntityTypeId INT,
+    UniqueId UNIQUEIDENTIFIER,
+    Author NVARCHAR(200),
+    CreatedOn DATETIME,
+    [Description] NVARCHAR(MAX),
+    CreatedBy NVARCHAR(128),
+    CreatedDate DATETIME,
+    ChangedBy NVARCHAR(128),
+    ChangedDate DATETIME,
+    AlternateName NVARCHAR(50),
+    MakerCheckerStatus BIT,
+    [Version] INT,
+    SafeCode BIT,
+    UserInterfaceCodeFileId INT,
+    ExecutionCodeFileId INT,
+    ApiVersion NVARCHAR(20),
+    UserInterfaceCodeVersion INT,
+    ExecutionCodeVersion INT,
+    ProcessURL NVARCHAR(4000)  -- computed column stored as nvarchar
+);
+
+DECLARE db_cursor CURSOR FOR
+SELECT name 
+FROM master.sys.databases 
+WHERE database_id > 4
+  AND state_desc = 'ONLINE';  -- Skip system and offline DBs
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @SQL = N'
+    IF EXISTS (
+        SELECT 1 
+        FROM ' + QUOTENAME(@DBName) + N'.sys.tables 
+        WHERE name = ''INV_BusinessEventTemplate''
+    )
+    BEGIN
+        INSERT INTO #Results
+        SELECT
+            ''' + @DBName + ''' AS DatabaseName,
+            BusinessEventTemplateID,
+            BusinessEventTemplateName,
+            Descriptor,
+            ConfigurationData,
+            TypeID,
+            StateID,
+            EntityTypeId,
+            UniqueId,
+            Author,
+            CreatedOn,
+            [Description],
+            CreatedBy,
+            CreatedDate,
+            ChangedBy,
+            ChangedDate,
+            AlternateName,
+            MakerCheckerStatus,
+            [Version],
+            SafeCode,
+            UserInterfaceCodeFileId,
+            ExecutionCodeFileId,
+            ApiVersion,
+            UserInterfaceCodeVersion,
+            ExecutionCodeVersion,
+            ProcessURL
+        FROM ' + QUOTENAME(@DBName) + N'.dbo.INV_BusinessEventTemplate
+        WHERE BusinessEventTemplateName = ''Fund Valuation'';
+    END;
+    ';
+
+    EXEC sys.sp_executesql @SQL;
+
+    FETCH NEXT FROM db_cursor INTO @DBName;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+-- ✅ Final combined result
+SELECT * FROM #Results;
