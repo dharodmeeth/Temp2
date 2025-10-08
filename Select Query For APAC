@@ -1,21 +1,98 @@
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
 
+CREATE TABLE #Results
+(
+    DatabaseName SYSNAME,
+    BusinessEventTemplateID INT NULL,
+    BusinessEventTemplateName NVARCHAR(50) NULL,
+    Descriptor NVARCHAR(MAX) NULL,
+    ConfigurationData VARBINARY(MAX) NULL,
+    TypeID INT NULL,
+    StateID INT NULL,
+    EntityTypeId INT NULL,
+    UniqueId UNIQUEIDENTIFIER NULL,
+    Author NVARCHAR(200) NULL,
+    CreatedOn DATETIME NULL,
+    [Description] NVARCHAR(MAX) NULL,
+    CreatedBy NVARCHAR(128) NULL,
+    CreatedDate DATETIME NULL,
+    ChangedBy NVARCHAR(128) NULL,
+    ChangedDate DATETIME NULL,
+    AlternateName NVARCHAR(50) NULL,
+    MakerCheckerStatus BIT NULL,
+    [Version] INT NULL,
+    SafeCode BIT NULL,
+    UserInterfaceCodeFileId INT NULL,
+    ExecutionCodeFileId INT NULL,
+    ApiVersion NVARCHAR(20) NULL,
+    UserInterfaceCodeVersion INT NULL,
+    ExecutionCodeVersion INT NULL,
+    ProcessURL NVARCHAR(4000) NULL
+);
 
-DECLARE AllDatabases CURSOR FOR
-SELECT name FROM master.dbo.sysdatabases WHERE dbid > 4
-OPEN AllDatabases
-DECLARE @DBNameVar NVARCHAR(128),@Statement NVARCHAR(4000)
-FETCH NEXT FROM AllDatabases INTO @DBNameVar
-WHILE (@@FETCH_STATUS = 0)
+DECLARE @DBName NVARCHAR(128);
+DECLARE @SQL NVARCHAR(MAX);
+
+DECLARE db_cursor CURSOR FOR
+SELECT name 
+FROM master.sys.databases 
+WHERE database_id > 4          -- skip system DBs
+  AND state_desc = 'ONLINE';   -- only online databases
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
 BEGIN
-PRINT N'CHECKING DATABASE' + @DBNameVar
-SET @Statement = N'USE ' + @DBNameVar + CHAR(13)
+    SET @SQL = N'
+    IF EXISTS (
+        SELECT 1 
+        FROM ' + QUOTENAME(@DBName) + N'.sys.tables 
+        WHERE name = ''INV_BusinessEventTemplate''
+    )
+    BEGIN
+        INSERT INTO #Results
+        SELECT 
+            ''' + @DBName + ''' AS DatabaseName,
+            BusinessEventTemplateID,
+            BusinessEventTemplateName,
+            Descriptor,
+            ConfigurationData,
+            TypeID,
+            StateID,
+            EntityTypeId,
+            UniqueId,
+            Author,
+            CreatedOn,
+            [Description],
+            CreatedBy,
+            CreatedDate,
+            ChangedBy,
+            ChangedDate,
+            AlternateName,
+            MakerCheckerStatus,
+            [Version],
+            SafeCode,
+            UserInterfaceCodeFileId,
+            ExecutionCodeFileId,
+            ApiVersion,
+            UserInterfaceCodeVersion,
+            ExecutionCodeVersion,
+            ProcessURL
+        FROM ' + QUOTENAME(@DBName) + N'.dbo.INV_BusinessEventTemplate
+        WHERE BusinessEventTemplateName = ''Fund Valuation'';
+    END;
+    ';
 
+    EXEC sys.sp_executesql @SQL;
 
-+ N'select * from inv_businesseventtemplate where BusinessEventTemplateName = ''Fund Valuation'''  --Add your query here
-
-EXEC sp_executesql  @Statement
-PRINT CHAR(13) + CHAR(13)
-FETCH NEXT FROM AllDatabases INTO @DBNameVar
+    FETCH NEXT FROM db_cursor INTO @DBName;
 END
-CLOSE AllDatabases
-DEALLOCATE AllDatabases
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+-- ✅ Final unified result
+SELECT * 
+FROM #Results
+ORDER BY DatabaseName;
