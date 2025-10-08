@@ -1,50 +1,6 @@
-DECLARE @DBName NVARCHAR(128);
-DECLARE @SQL NVARCHAR(MAX);
+Msg 207, Level 16, State 1, Line 48
+Invalid column name 'Cols'.
+Msg 207, Level 16, State 1, Line 49
+Invalid column name 'Cols'.
 
--- Create temp table to hold all results (structure created dynamically)
-IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
-CREATE TABLE #Results (
-    DatabaseName SYSNAME,
-    Cols NVARCHAR(MAX)
-);
-
-DECLARE db_cursor CURSOR FOR
-SELECT name 
-FROM master.sys.databases 
-WHERE database_id > 4      -- skip system DBs
-  AND state_desc = 'ONLINE'; -- only online DBs
-
-OPEN db_cursor;
-FETCH NEXT FROM db_cursor INTO @DBName;
-
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    SET @SQL = N'
-    IF EXISTS (SELECT 1 FROM ' + QUOTENAME(@DBName) + N'.sys.tables WHERE name = ''inv_businesseventtemplate'')
-    BEGIN
-        SELECT ''' + @DBName + ''' AS DatabaseName, *
-        INTO ##tmp_' + @DBName + '
-        FROM ' + QUOTENAME(@DBName) + N'.dbo.inv_businesseventtemplate
-        WHERE BusinessEventTemplateName = ''Fund Valuation'';
-
-        INSERT INTO #Results
-        SELECT DatabaseName, CONVERT(NVARCHAR(MAX), (SELECT * FROM ##tmp_' + @DBName + ' FOR JSON AUTO))
-        FROM ##tmp_' + @DBName + ';
-
-        DROP TABLE ##tmp_' + @DBName + ';
-    END;
-    ';
-    EXEC sys.sp_executesql @SQL;
-
-    FETCH NEXT FROM db_cursor INTO @DBName;
-END
-
-CLOSE db_cursor;
-DEALLOCATE db_cursor;
-
--- Final unified result
--- Parse back JSON for readability (optional)
-SELECT DatabaseName,
-       JSON_VALUE(Cols, '$[0].BusinessEventTemplateName') AS BusinessEventTemplateName,
-       Cols AS AllColumns_JSON
-FROM #Results;
+Completion time: 2025-10-09T00:21:12.7194994+08:00
