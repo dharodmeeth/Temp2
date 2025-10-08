@@ -1,0 +1,21 @@
+
+
+DECLARE AllDatabases CURSOR FOR
+SELECT name FROM master.dbo.sysdatabases WHERE dbid > 4
+OPEN AllDatabases
+DECLARE @DBNameVar NVARCHAR(128),@Statement NVARCHAR(4000)
+FETCH NEXT FROM AllDatabases INTO @DBNameVar
+WHILE (@@FETCH_STATUS = 0)
+BEGIN
+PRINT N'CHECKING DATABASE' + @DBNameVar
+SET @Statement = N'USE ' + @DBNameVar + CHAR(13)
+
+
++ N'select * from inv_businesseventtemplate where BusinessEventTemplateName = ''Fund Valuation'''  --Add your query here
+
+EXEC sp_executesql  @Statement
+PRINT CHAR(13) + CHAR(13)
+FETCH NEXT FROM AllDatabases INTO @DBNameVar
+END
+CLOSE AllDatabases
+DEALLOCATE AllDatabases
