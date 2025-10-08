@@ -1,6 +1,47 @@
-Msg 207, Level 16, State 1, Line 48
-Invalid column name 'Cols'.
-Msg 207, Level 16, State 1, Line 49
-Invalid column name 'Cols'.
+DECLARE @DBName NVARCHAR(128);
+DECLARE @SQL NVARCHAR(MAX);
 
-Completion time: 2025-10-09T00:21:12.7194994+08:00
+-- Drop and recreate results table
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
+
+-- Create a dummy structure so we can insert dynamically later
+CREATE TABLE #Results (
+    DatabaseName SYSNAME,
+    BusinessEventTemplateID INT,  -- adjust based on real schema if needed
+    BusinessEventTemplateName NVARCHAR(255),
+    -- placeholder columns — will expand dynamically
+    DummyCol INT NULL
+);
+ALTER TABLE #Results DROP COLUMN DummyCol;
+
+DECLARE db_cursor CURSOR FOR
+SELECT name 
+FROM master.sys.databases 
+WHERE database_id > 4       -- exclude system DBs
+  AND state_desc = 'ONLINE'; -- only online DBs
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @SQL = N'
+    IF EXISTS (SELECT 1 
+               FROM ' + QUOTENAME(@DBName) + N'.sys.tables 
+               WHERE name = ''inv_businesseventtemplate'')
+    BEGIN
+        INSERT INTO #Results
+        SELECT ''' + @DBName + ''' AS DatabaseName, t.*
+        FROM ' + QUOTENAME(@DBName) + N'.dbo.inv_businesseventtemplate AS t
+        WHERE t.BusinessEventTemplateName = ''Fund Valuation'';
+    END;
+    ';
+
+    EXEC sys.sp_executesql @SQL;
+    FETCH NEXT FROM db_cursor INTO @DBName;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+SELECT * FROM #Results;
