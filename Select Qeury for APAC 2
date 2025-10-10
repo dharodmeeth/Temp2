@@ -1,0 +1,51 @@
+SET NOCOUNT ON;
+
+DECLARE @DBName NVARCHAR(128);
+DECLARE @SQL NVARCHAR(MAX);
+
+-- Temporary table to store results
+IF OBJECT_ID('tempdb..#Results') IS NOT NULL DROP TABLE #Results;
+CREATE TABLE #Results (
+    DBName SYSNAME,
+    BusinessEventTemplateID INT NULL,
+    BusinessEventTemplateName NVARCHAR(255) NULL,
+    [OtherColumns] NVARCHAR(MAX) NULL
+);
+
+DECLARE db_cursor CURSOR FOR
+SELECT name
+FROM master.sys.databases
+WHERE database_id > 4              -- exclude system DBs (master, model, msdb, tempdb)
+  AND state_desc = 'ONLINE';       -- skip offline DBs
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @SQL = '
+    BEGIN TRY
+        INSERT INTO #Results (DBName, BusinessEventTemplateID, BusinessEventTemplateName, [OtherColumns])
+        SELECT 
+            ''' + @DBName + ''' AS DBName,
+            BusinessEventTemplateID,
+            BusinessEventTemplateName,
+            ''...'' AS [OtherColumns]
+        FROM [' + @DBName + '].dbo.inv_businesseventtemplate
+        WHERE BusinessEventTemplateName = ''Fund Valuation'';
+    END TRY
+    BEGIN CATCH
+        PRINT ''Skipped database: ' + @DBName + ' (table not found or access denied)'';
+    END CATCH;
+    ';
+
+    EXEC sp_executesql @SQL;
+
+    FETCH NEXT FROM db_cursor INTO @DBName;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+-- Show combined results
+SELECT * FROM #Results;
