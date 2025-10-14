@@ -1,0 +1,43 @@
+🔹 Steps to Restore a Replicated Database
+1️⃣ Remove replication before restore
+
+You must remove replication metadata first, but this requires that you cannot just rename the database. If UATDB is currently being replicated (even partially), you need to remove it carefully:
+
+-- Disable replication on UATDB
+USE UATDB;
+EXEC sp_removedbreplication @dbname = N'UATDB';
+GO
+
+-- Remove publish option
+EXEC sp_replicationdboption @dbname = N'UATDB', @optname = N'publish', @value = N'false';
+GO
+
+
+If the database is a subscriber, you also need to remove the subscription using sp_dropsubscription and/or sp_dropdistributiondb depending on the setup.
+
+2️⃣ Take the database offline (optional but safe)
+ALTER DATABASE UATDB SET OFFLINE WITH ROLLBACK IMMEDIATE;
+
+
+This ensures no connections are blocking the restore.
+
+3️⃣ Restore the production backup
+RESTORE DATABASE UATDB
+FROM DISK = 'D:\Backup\ProdDB.bak'
+WITH REPLACE, RECOVERY;
+
+4️⃣ Clean up any leftover replication metadata
+
+Sometimes the restore brings over replication flags from PROD. Run after restore:
+
+USE UATDB;
+EXEC sp_removedbreplication @dbname = N'UATDB';
+EXEC sp_replicationdboption @dbname = N'UATDB', @optname = N'publish', @value = N'false';
+
+5️⃣ Verify replication flags are cleared
+SELECT name, is_published, is_subscribed, is_distributor
+FROM sys.databases
+WHERE name = 'UATDB';
+
+
+All values should now be 0.
