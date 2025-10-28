@@ -1,0 +1,48 @@
+# Define parameters
+$SqlServerInstance = "INVSUKSQUA02\INVLUKSQLUA01"  # Replace with your SQL Server instance name
+$BackupDirectory = "\\invsukfspr01\dba$\daily\MIGRATION_BACKUPS"  # Replace with your desired backup directory
+
+# Ensure the backup directory exists
+if (!(Test-Path -Path $BackupDirectory)) {
+    New-Item -ItemType Directory -Path $BackupDirectory | Out-Null
+}
+
+# Load the SqlServer module
+Import-Module SqlServer
+
+# Get all databases on the SQL Server instance
+try {
+    $Databases = Get-SqlDatabase -ServerInstance $SqlServerInstance
+} catch {
+    Write-Host "Error: Unable to connect to SQL Server instance '$SqlServerInstance'."
+    Write-Host $_.Exception.Message
+    exit 1
+}
+
+# Loop through each database and back it up
+foreach ($Database in $Databases) {
+    # Skip system databases if desired
+    if ($Database.Name -in @("master", "model", "msdb", "tempdb")) {
+        Write-Host "Skipping system database: $($Database.Name)"
+        continue
+    }
+
+    # Define the backup file name
+    $BackupFile = Join-Path -Path $BackupDirectory -ChildPath "$($Database.Name)_$(Get-Date -Format 'yyyyMMdd_HHmmss').bak"
+
+    try {
+        # Perform the backup
+        Write-Host "Backing up database: $($Database.Name) to $BackupFile"
+        Backup-SqlDatabase -ServerInstance $SqlServerInstance -Database $Database.Name -BackupFile $BackupFile -ErrorAction Stop
+        Write-Host "Backup completed for database: $($Database.Name)"
+    } catch {
+        Write-Host "Error backing up database: $($Database.Name)"
+        Write-Host $_.Exception.Message
+    }
+}
+
+Write-Host "All database backups completed."
+
+
+BACKUP DATABASE	Verify75SPPRDstg                 
+TO disk ='f:\sql_backup\Verify75SPPRDstg.bak' with COPY_ONLY,init, MAXTRANSFERSIZE = 262144,compression
