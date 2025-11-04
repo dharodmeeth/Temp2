@@ -23,3 +23,92 @@ WHERE LEN(BlindCarbonCopy) > 4000
 	[IsDoNotSend] [bit] NOT NULL,
 	[PersonalizedAttachmentPrefix] [nvarchar](255) NULL
 -------------------------------------------
+
+
+SET NOCOUNT ON;
+
+DECLARE @DBName NVARCHAR(255);
+DECLARE @SQL NVARCHAR(MAX);
+
+-- Temporary table to collect results from all DBs
+CREATE TABLE #Results (
+    DatabaseName SYSNAME,
+    EmailDeliveryInformationId INT,
+    GenerationProcessId INT,
+    Sender NVARCHAR(255),
+    Recipient NVARCHAR(255),
+    CarbonCopy NVARCHAR(MAX),
+    BlindCarbonCopy NVARCHAR(MAX),
+    ReplyTo NVARCHAR(255),
+    Subject NVARCHAR(255),
+    HighImportance BIT,
+    RequestDeliveryReceipt BIT,
+    RequestReadReceipt BIT,
+    BlindCarbonCopySender BIT,
+    BodyFileId INT,
+    AttachmentFileId INT,
+    Comments NVARCHAR(255),
+    IsDoNotSend BIT,
+    PersonalizedAttachmentPrefix NVARCHAR(255)
+);
+
+DECLARE db_cursor CURSOR FAST_FORWARD FOR
+SELECT name
+FROM sys.databases
+WHERE database_id > 4  -- skip system DBs
+  AND state_desc = 'ONLINE';
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @DBName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @SQL = '
+        BEGIN TRY
+            IF EXISTS (
+                SELECT 1 FROM [' + @DBName + '].sys.objects
+                WHERE name = ''RE_EmailDeliveryInformation'' AND type = ''U''
+            )
+            BEGIN
+                INSERT INTO #Results
+                SELECT
+                    ''' + @DBName + ''' AS DatabaseName,
+                    EmailDeliveryInformationId,
+                    GenerationProcessId,
+                    Sender,
+                    Recipient,
+                    CarbonCopy,
+                    BlindCarbonCopy,
+                    ReplyTo,
+                    Subject,
+                    HighImportance,
+                    RequestDeliveryReceipt,
+                    RequestReadReceipt,
+                    BlindCarbonCopySender,
+                    BodyFileId,
+                    AttachmentFileId,
+                    Comments,
+                    IsDoNotSend,
+                    PersonalizedAttachmentPrefix
+                FROM [' + @DBName + '].dbo.RE_EmailDeliveryInformation
+                WHERE LEN(BlindCarbonCopy) > 4000;
+            END
+        END TRY
+        BEGIN CATCH
+            PRINT ''Skipping database ' + @DBName + ': '' + ERROR_MESSAGE();
+        END CATCH;
+    ';
+    EXEC sp_executesql @SQL;
+
+    FETCH NEXT FROM db_cursor INTO @DBName;
+END;
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+-- Show all results together
+SELECT *
+FROM #Results
+ORDER BY DatabaseName, EmailDeliveryInformationId;
+
+DROP TABLE #Results;
