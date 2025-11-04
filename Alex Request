@@ -4,52 +4,22 @@ WHERE LEN(BlindCarbonCopy) > 4000
  
 -----------------------
 
-SET NOCOUNT ON;
-
-DECLARE @DBName NVARCHAR(255);
-DECLARE @SQL NVARCHAR(MAX);
-
--- Table variable to collect results from all databases
-CREATE TABLE #Results (
-    DatabaseName SYSNAME,
-    [ID] INT NULL,  -- adjust columns to match your table schema if needed
-    [OtherColumns] NVARCHAR(MAX) NULL,  -- placeholder if needed
-    BlindCarbonCopy NVARCHAR(MAX)
-);
-
-DECLARE db_cursor CURSOR FAST_FORWARD FOR
-SELECT name
-FROM sys.databases
-WHERE database_id > 4  -- skip system databases: master, model, msdb, tempdb
-  AND state_desc = 'ONLINE';
-
-OPEN db_cursor;
-FETCH NEXT FROM db_cursor INTO @DBName;
-
-WHILE @@FETCH_STATUS = 0
-BEGIN
-    SET @SQL = '
-        BEGIN TRY
-            INSERT INTO #Results (DatabaseName, BlindCarbonCopy)
-            SELECT ''' + @DBName + ''', BlindCarbonCopy
-            FROM [' + @DBName + '].dbo.RE_EmailDeliveryInformation
-            WHERE LEN(BlindCarbonCopy) > 4000;
-        END TRY
-        BEGIN CATCH
-            PRINT ''Skipping database ' + @DBName + ': '' + ERROR_MESSAGE();
-        END CATCH;
-    ';
-    EXEC sp_executesql @SQL;
-    FETCH NEXT FROM db_cursor INTO @DBName;
-END;
-
-CLOSE db_cursor;
-DEALLOCATE db_cursor;
-
--- Show combined results
-SELECT *
-FROM #Results;
-
-DROP TABLE #Results;
-
+[dbo].[RE_EmailDeliveryInformation](
+	[EmailDeliveryInformationId] [int] IDENTITY(1,1) NOT FOR REPLICATION NOT NULL,
+	[GenerationProcessId] [int] NOT NULL,
+	[Sender] [nvarchar](255) NOT NULL,
+	[Recipient] [nvarchar](255) NULL,
+	[CarbonCopy] [nvarchar](max) NULL,
+	[BlindCarbonCopy] [nvarchar](max) NULL,
+	[ReplyTo] [nvarchar](255) NULL,
+	[Subject] [nvarchar](255) NULL,
+	[HighImportance] [bit] NOT NULL,
+	[RequestDeliveryReceipt] [bit] NOT NULL,
+	[RequestReadReceipt] [bit] NOT NULL,
+	[BlindCarbonCopySender] [bit] NOT NULL,
+	[BodyFileId] [int] NULL,
+	[AttachmentFileId] [int] NULL,
+	[Comments] [nvarchar](255) NULL,
+	[IsDoNotSend] [bit] NOT NULL,
+	[PersonalizedAttachmentPrefix] [nvarchar](255) NULL
 -------------------------------------------
