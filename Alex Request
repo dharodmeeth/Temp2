@@ -1,0 +1,4 @@
+SELECT * FROM dbo.RE_EmailDeliveryInformation
+
+WHERE LEN(BlindCarbonCopy) > 4000
+ 
