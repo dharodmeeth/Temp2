@@ -1,0 +1,14 @@
+-- Connectivity ring buffer: can show login timeouts, SNI errors, resets
+SELECT TOP 200
+    DATEADD(ms, -1 * (cpu_ticks / (cpu_ticks/ms_ticks)), GETDATE()) AS approx_event_time,
+    CONVERT(XML, record) AS x
+FROM sys.dm_os_ring_buffers
+CROSS JOIN sys.dm_os_sys_info
+WHERE ring_buffer_type = 'RING_BUFFER_CONNECTIVITY'
+ORDER BY approx_event_time DESC;
+
+
+Msg 8115, Level 16, State 2, Line 2
+Arithmetic overflow error converting expression to data type int.
+
+Completion time: 2025-11-06T16:46:53.3564445+01:00
