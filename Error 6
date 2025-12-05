@@ -1,95 +1,12 @@
-ALTER PROCEDURE [dbo].[DBA_ETLSQLagentJobCheck_report] 
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE 
-        @htmltable NVARCHAR(MAX),
-        @MailProfile VARCHAR(50), 
-        @SubjectLine NVARCHAR(255);
-
-    -- Get mail profile
-    SELECT TOP 1 @MailProfile = [name] FROM msdb..sysmail_profile;
-    SELECT @SubjectLine = 'ETL Job Report For V1WBSINVSQ07L1';
-
-    -- Build the HTML table header
-    SET @htmltable = 
-    N'
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>SQL Agent Job Check</title>
-        <style>
-            body { font-family: Arial, sans-serif; font-size: 10pt; background-color: #F5F5F5; margin: 20px; }
-            table { width: 100%; border: 1px solid black; border-collapse: collapse; background-color: #DCDFDF; text-align: center; }
-            th { border: 1px solid white; background-color: #7FB1B3; padding: 10px; color: white; font-weight: bold; }
-            td { border: 1px solid black; padding: 8px; }
-        </style>
-    </head>
-    <body>
-    <h2>ETL Job Report For V1WBSINVSQ07L1</h2>
-    <table>
-        <tr>
-            <th>Job Name</th>
-            <th>Message</th>
-            <th>Date</th>
-            <th>Status</th>
-        </tr>';
-
-    ;WITH LastRun AS (
-        SELECT 
-            job_id,
-            MAX(CONVERT(DATETIME, RTRIM(run_date)) + 
-                (run_time / 10000) * (1.0/24) + 
-                ((run_time % 10000) / 100) * (1.0/1440) + 
-                (run_time % 100) * (1.0/86400)) AS LastRunDateTime
-        FROM msdb..sysjobhistory
-        WHERE step_id = 0
-        GROUP BY job_id
-    )
-    SELECT @htmltable = @htmltable + 
-    STRING_AGG(
-        '<tr>
-            <td>' + CAST(SJ.name as varchar(max)) + '</td>
-            <td>' + SJH.message + '</td>
-            <td>' + CONVERT(VARCHAR, LastRun.LastRunDateTime, 100) + '</td>
-            <td>' + 
-                CASE 
-                    WHEN SJH.run_status = 0 THEN 'Failed'
-                    WHEN SJH.run_status = 1 THEN 'Succeeded'
-                    WHEN SJH.run_status = 2 THEN 'Retry'
-                    WHEN SJH.run_status = 3 THEN 'Cancelled'
-                    ELSE 'Unknown'
-                END
-            + '</td>
-        </tr>', 
-        ''
-    )
-    FROM LastRun
-    JOIN msdb..sysjobhistory SJH 
-        ON LastRun.job_id = SJH.job_id
-       AND LastRun.LastRunDateTime = CONVERT(DATETIME, RTRIM(SJH.run_date)) + 
-            (run_time / 10000) * (1.0/24) + 
-            ((run_time % 10000) / 100) * (1.0/1440) + 
-            (run_time % 100) * (1.0/86400)
-    JOIN msdb..sysjobs SJ ON SJH.job_id = SJ.job_id  
-    WHERE SJ.name LIKE 'DXRA%'  
-      AND SJH.step_id = 0;
-
-    -- Close the HTML table
-    SET @htmltable = @htmltable + 
-    N'
-    </table>
-    </body>
-    </html>';
-
-    -- Send email
-    EXEC msdb.dbo.sp_send_dbmail 
-        @profile_name = @MailProfile,
-        @recipients = 'luiza.vladescu@Fisglobal.com;meeth.dharod@Fisglobal.com;shivam.gupta3@fisglobal.com',
-        @subject = @SubjectLine,
-        @body = @htmltable,
-        @body_format = 'HTML';
-END
-GO
+SELECT  
+    j.name AS JobName,
+    h.step_id,
+    h.run_status,       -- 0 = fail, 1 = success
+    h.message,
+    h.run_date,
+    h.run_time
+FROM msdb.dbo.sysjobs j
+JOIN msdb.dbo.sysjobhistory h
+    ON j.job_id = h.job_id
+WHERE j.name = 'Your Job Name Here'
+ORDER BY h.instance_id DESC;
