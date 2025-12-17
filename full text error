@@ -1,0 +1,21 @@
+EXEC sp_fulltext_service 'load_os_resources', 1  
+GO
+EXEC sp_fulltext_service 'verify_signature', 0
+GO
+
+
+Server Name	document_type	class_id	path	version	manufacturer
+V1WBSCINVSQ14A, 1490	.pdf	6c337b26-3e38-4f98-813b-fba18bab64f5	C:\Windows\system32\Windows.Data.Pdf.dll	6.2.20348.3451	Microsoft Corporation
+V1WBSCINVSQ14B, 1490	.pdf	e8978da6-047f-4e3d-9c78-cdbe46041603	C:\Program Files\Adobe\Adobe PDF iFilter 11 for 64-bit platforms\bin\PDFFilter.dll	11.0.1.36	Adobe Systems, Inc.
+P2WBSCINVSQ14C, 1490	.pdf	e8978da6-047f-4e3d-9c78-cdbe46041603	C:\Program Files\Adobe\Adobe PDF iFilter 11 for 64-bit platforms\bin\PDFFilter.dll	11.0.1.36	Adobe Systems, Inc.
+P2WBSCINVSQ14D, 1490	.pdf	e8978da6-047f-4e3d-9c78-cdbe46041603	C:\Program Files\Adobe\Adobe PDF iFilter 11 for 64-bit platforms\bin\PDFFilter.dll	11.0.1.36	Adobe Systems, Inc.
+
+
+
+Server Name	(No column name)
+V1WBSCINVSQ14A, 1490	Microsoft SQL Server 2022 (RTM-CU19-GDR) (KB5058721) - 16.0.4200.1 (X64)   May 31 2025 08:13:20   Copyright (C) 2022 Microsoft Corporation  Enterprise Edition: Core-based Licensing (64-bit) on Windows Server 2022 Standard 10.0 <X64> (Build 20348: ) (Hypervisor) 
+V1WBSCINVSQ14B, 1490	Microsoft SQL Server 2022 (RTM-CU18) (KB5050771) - 16.0.4185.3 (X64)   Feb 28 2025 18:24:49   Copyright (C) 2022 Microsoft Corporation  Enterprise Edition: Core-based Licensing (64-bit) on Windows Server 2022 Standard 10.0 <X64> (Build 20348: ) (Hypervisor) 
+P2WBSCINVSQ14C, 1490	Microsoft SQL Server 2022 (RTM-CU18) (KB5050771) - 16.0.4185.3 (X64)   Feb 28 2025 18:24:49   Copyright (C) 2022 Microsoft Corporation  Enterprise Edition: Core-based Licensing (64-bit) on Windows Server 2022 Standard 10.0 <X64> (Build 20348: ) (Hypervisor) 
+P2WBSCINVSQ14D, 1490	Microsoft SQL Server 2022 (RTM-CU18) (KB5050771) - 16.0.4185.3 (X64)   Feb 28 2025 18:24:49   Copyright (C) 2022 Microsoft Corporation  Enterprise Edition: Core-based Licensing (64-bit) on Windows Server 2022 Standard 10.0 <X64> (Build 20348: ) (Hypervisor) 
+
+
