@@ -1,3 +1,27 @@
 Sql Message ID: 50000 
 Message: 
 Executed as user: CLIENT\gmsa-INVSQ11A_P$. ...000) Server: V1WBSCINVSQ11A [SQLSTATE 01000] (Message 50000) Version: 15.0.4385.2 [SQLSTATE 01000] (Message 50000) Edition: Enterprise Edition: Core-based Licensing (64-bit) [SQLSTATE 01000] (Message 50000) Platform: Windows [SQLSTATE 01000] (Message 50000) Procedure: [EnterpriseMonitor].[dbo].[DatabaseBackup] [SQLSTATE 01000] (Message 50000) Parameters: @Databases = 'GGCPRD', @Directory = 'F:\SQL_Backup\GCCPRD_Backups_DND', @BackupType = 'FULL', @Verify = 'N', @CleanupTime = 744, @CleanupMode = 'AFTER_BACKUP', @Compress = 'Y', @CompressionAlgorithm = NULL, @CompressionLevel = NULL, @CopyOnly = 'Y', @ChangeBackupType = 'N', @BackupSoftware = NULL, @Checksum = NULL, @BlockSize = NULL, @BufferCount = NULL, @MaxTransferSize = 4194304, @NumberOfFiles = 1, @MinBackupSizeForMultipleFiles = NULL, @MaxFileSize = NULL, @CompressionLevelNumeric = NULL, @Description = NULL, @BackupSetName = NULL, @Threads = NULL, @Throttle = NULL, @Encrypt = 'N', @EncryptionAlgorithm = NULL, @ServerCertificate = NULL, @ServerAsymmetricKey = NULL, @EncryptionKey = NULL, @ReadWriteFileGroups = 'N', @OverrideBackupPreference = 'N', @NoRecovery = 'N', @URL = NULL, @Credential = NULL, @MirrorDirectory = NULL, @MirrorCleanupTime = NULL, @MirrorCleanupMode = 'AFTER_BACKUP', @MirrorURL = NULL, @AvailabilityGroups = NULL, @Updateability = 'ALL', @AdaptiveCompression = NULL, @ModificationLevel = NULL, @MinDatabaseSizeForDifferentialBackup = NULL, @LogSizeSinceLastLogBackup = NULL, @TimeSinceLastLogBackup = NULL, @DataDomainBoostHost = NULL, @DataDomainBoostUser = NULL, @DataDomainBoostDevicePath = NULL, @DataDomainBoostLockboxPath = NULL, @DirectoryStructure = '{ServerName}${InstanceName}{DirectorySeparator}{DatabaseName}{DirectorySeparator}{BackupType}_{Partial}_{CopyOnly}', @AvailabilityGroupDirectoryStructure = '{ClusterName}${AvailabilityGroupName}{DirectorySeparator}{DatabaseName}{DirectorySeparator}{BackupType}_{Partial}_{CopyOnly}', @DirectoryStructureCase = NULL, @FileName = '{ServerName}${InstanceName}_{DatabaseName}_{BackupType}_{Partial}_{CopyOnly}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}', @AvailabilityGroupFileName = '{ClusterName}${AvailabilityGroupName}_{DatabaseName}_{BackupType}_{Partial}_{CopyOnly}_{Year}{Month}{Day}_{Hour}{Minute}{Second}_{FileNumber}.{FileExtension}', @FileNameCase = NULL, @TokenTimezone = 'LOCAL', @FileExtensionFull =... Version: 2025-08-23 17:25:24 [SQLSTATE 01000] (Message 50000) Source: https://ola.hallengren.com [SQLSTATE 01000] (Message 50000) [SQLSTATE 01000] (Message 50000) Date and time: 2025-12-27 00:20:02 [SQLSTATE 01000] (Message 50000) Database: [GGCPRD] [SQLSTATE 01000] (Message 50000) State: ONLINE [SQLSTATE 01000] (Message 50000) Standby: No [SQLSTATE 01000] (Message 50000) Updateability: READ_WRITE [SQLSTATE 01000] (Message 50000) User access: MULTI_USER [SQLSTATE 01000] (Message 50000) Recovery model: FULL [SQLSTATE 01000] (Message 50000) Encrypted: Yes [SQLSTATE 01000] (Message 50000) Availability group: V1WBSCINVSQ11_AG [SQLSTATE 01000] (Message 50000) Availability group role: PRIMARY [SQLSTATE 01000] (Message 50000) Availability group database replica synchronization state: SYNCHRONIZED [SQLSTATE 01000] (Message 50000) Availability group database replica synchronization health: HEALTHY [SQLSTATE 01000] (Message 50000) Availability group backup preference: PRIMARY [SQLSTATE 01000] (Message 50000) Is preferred backup replica: Yes [SQLSTATE 01000] (Message 50000) Differential base LSN: 108823000003518800001 [SQLSTATE 01000] (Message 50000) Last log backup LSN: 108837000001058800001 [SQLSTATE 01000] (Message 50000) Allocated extent page count: N/A [SQLSTATE 01000] (Message 50000) Modified extent page count: N/A [SQLSTATE 01000] (Message 50000) [SQLSTATE 01000] (Message 50000) Cannot perform a backup or restore operation within a transaction. [SQLSTATE 42000] (Error 3021) BACKUP DA... The step failed. 
+
+
+
+--OLD SCRIPT by Mani Mathwan
+/* 
+--use master
+--Go
+--BACKUP DATABASE [GGCPRD] TO DISK = 'F:\SQL_Backup\GCCPRD_Backups_DND\GGCPRD_full.bak' WITH MAXTRANSFERSIZE = 262144, copy_only, COMPRESSION, STATS = 10;
+*/
+
+-- New Script by Shrikant
+EXECUTE [EnterpriseMonitor].[dbo].[DatabaseBackup]
+    @Databases = 'GGCPRD',
+    @Directory = 'F:\SQL_Backup\GCCPRD_Backups_DND',
+    @BackupType = 'FULL',
+    @CopyOnly = 'Y',
+    @Compress = 'Y',
+    @MaxTransferSize = 4194304,
+    @NumberOfFiles = 1,
+    @CleanupTime = 744,
+    @LogToTable = 'Y';
+
+
+
