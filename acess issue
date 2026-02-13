@@ -1,0 +1,21 @@
+“TITLE: Microsoft SQL Server Management Studio
+------------------------------
+ 
+The database C142261_DW is not accessible. (ObjectExplorer)
+ 
+------------------------------
+BUTTONS:
+ 
+OK
+------------------------------”
+ 
+===================================
+ 
+The database C142261_DW is not accessible. (ObjectExplorer)
+ 
+------------------------------
+Program Location:
+ 
+   at Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer.DatabaseNavigableItem.get_CanGetChildren()
+   at Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer.NavigableItem.RequestChildren(IGetChildrenRequest request)
+   at Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer.ExplorerHierarchyNode.BuildChildren(WaitHandle quitEvent)
