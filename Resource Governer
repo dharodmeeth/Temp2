@@ -1,0 +1,221 @@
+SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+
+/* ---------------------------
+   0) Instance & memory basics
+   --------------------------- */
+DECLARE @instance sysname        = @@SERVERNAME;
+DECLARE @version  nvarchar(128)  = CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128));
+DECLARE @edition  nvarchar(128)  = CAST(SERVERPROPERTY('Edition') AS nvarchar(128));
+DECLARE @engine   nvarchar(128)  = CAST(SERVERPROPERTY('EngineEdition') AS nvarchar(128));
+
+/* max server memory (MB) from sp_configure/sys.configurations */
+DECLARE @max_server_memory_mb bigint =
+(
+    SELECT TRY_CAST(value_in_use AS bigint)
+    FROM sys.configurations
+    WHERE name = 'max server memory (MB)'
+);
+
+/* ---------------------------
+   1) RG switch + classifier
+   --------------------------- */
+;WITH rg AS
+(
+    SELECT
+        is_enabled,
+        is_reconfiguration_pending,
+        classifier_function_id   = classifier_function_id
+    FROM sys.resource_governor_configuration
+)
+SELECT
+    [Report Time (UTC)]         = CONVERT(datetime2(0), SYSUTCDATETIME()),
+    [Instance]                  = @instance,
+    [Product Version]           = @version,
+    [Edition]                   = @edition,
+    [EngineEdition]             = @engine,
+    [RG Enabled?]               = CASE rg.is_enabled WHEN 1 THEN 'YES' ELSE 'NO' END,
+    [RG Reconfigure Pending?]   = CASE rg.is_reconfiguration_pending WHEN 1 THEN 'YES' ELSE 'NO' END,
+    [Classifier Function]       = COALESCE(QUOTENAME(OBJECT_SCHEMA_NAME(rg.classifier_function_id))
+                                           + '.' + QUOTENAME(OBJECT_NAME(rg.classifier_function_id)),
+                                           '<none>')
+FROM rg;
+
+PRINT REPLICATE('-', 90);
+
+/* ------------------------------------
+   2) Classifier function (definition)
+   ------------------------------------ */
+DECLARE @classifier_id int =
+(
+    SELECT classifier_function_id
+    FROM sys.resource_governor_configuration
+);
+
+IF @classifier_id IS NOT NULL
+BEGIN
+    SELECT
+        [Classifier Function] = QUOTENAME(OBJECT_SCHEMA_NAME(@classifier_id)) + '.' + QUOTENAME(OBJECT_NAME(@classifier_id)),
+        [Created Date]        = OBJECTPROPERTYEX(@classifier_id, 'CreationDate'),
+        [Is Schema Bound?]    = CASE WHEN OBJECTPROPERTYEX(@classifier_id, 'IsSchemaBound') = 1 THEN 'YES' ELSE 'NO' END,
+        [Definition]          = OBJECT_DEFINITION(@classifier_id)
+    ;
+END
+ELSE
+BEGIN
+    SELECT [Classifier Function] = '<none configured>', [Created Date] = NULL, [Is Schema Bound?] = NULL, [Definition] = NULL;
+END;
+
+PRINT REPLICATE('-', 90);
+
+/* ----------------------------------------------------
+   3) Resource pools (configured) + computed memory MB
+   ---------------------------------------------------- */
+;WITH pools AS
+(
+    SELECT
+        rp.pool_id,
+        rp.name,
+        rp.min_cpu_percent,
+        rp.max_cpu_percent,
+        rp.cap_cpu_percent,                 -- NULL on older versions
+        rp.min_memory_percent,
+        rp.max_memory_percent,
+        rp.min_iops_per_volume,             -- only on some editions
+        rp.max_iops_per_volume
+    FROM sys.resource_governor_resource_pools AS rp
+)
+SELECT
+    p.pool_id,
+    [Pool Name]            = p.name,
+    [Min CPU %]            = p.min_cpu_percent,
+    [Max CPU %]            = p.max_cpu_percent,
+    [Cap CPU %]            = p.cap_cpu_percent,
+    [Min Mem %]            = p.min_memory_percent,
+    [Max Mem %]            = p.max_memory_percent,
+    [Min Mem (MB est)]     = CASE WHEN @max_server_memory_mb IS NOT NULL
+                                  THEN (@max_server_memory_mb * p.min_memory_percent) / 100
+                                  ELSE NULL END,
+    [Max Mem (MB est)]     = CASE WHEN @max_server_memory_mb IS NOT NULL
+                                  THEN (@max_server_memory_mb * p.max_memory_percent) / 100
+                                  ELSE NULL END,
+    [Min IOPS/Vol]         = p.min_iops_per_volume,
+    [Max IOPS/Vol]         = p.max_iops_per_volume
+FROM pools AS p
+ORDER BY p.pool_id;
+
+PRINT REPLICATE('-', 90);
+
+/* ----------------------------------------------
+   4) Workload groups and their parent pool
+   ---------------------------------------------- */
+SELECT
+    wg.group_id,
+    [Workload Group]       = wg.name,
+    [Parent Pool]          = rp.name,
+    [Importance]           = wg.importance,           -- LOW|MEDIUM|HIGH
+    [Request Max Mem Grant %] = wg.request_max_memory_grant_percent,
+    [Request Max CPU Time (sec)] = wg.request_max_cpu_time_sec,
+    [Request Mem Grant Timeout (sec)] = wg.request_memory_grant_timeout_sec,
+    [Max DOP]              = wg.max_dop,
+    [Group Max Requests]   = wg.group_max_requests
+FROM sys.resource_governor_workload_groups AS wg
+JOIN sys.resource_governor_resource_pools AS rp
+  ON wg.pool_id = rp.pool_id
+ORDER BY rp.name, wg.name;
+
+PRINT REPLICATE('-', 90);
+
+/* ----------------------------------------------------
+   5) Runtime view of pools (DMV) - current statistics
+   ---------------------------------------------------- */
+IF HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
+BEGIN
+    SELECT
+        rpr.pool_id,
+        [Pool Name]             = rp.name,
+        rpr.min_cpu_percent,
+        rpr.max_cpu_percent,
+        rpr.min_memory_percent,
+        rpr.max_memory_percent,
+        [Total Mem KB]          = rpr.total_memory_kb,
+        [Used Mem KB]           = rpr.used_memory_kb,
+        [Target Mem KB]         = rpr.target_memory_kb,
+        [Blocked Mem Grants]    = rpr.blocked_process_count
+    FROM sys.dm_resource_governor_resource_pools AS rpr
+    JOIN sys.resource_governor_resource_pools AS rp
+      ON rpr.pool_id = rp.pool_id
+    ORDER BY rpr.pool_id;
+
+    PRINT REPLICATE('-', 90);
+
+    /* ---------------------------------------------
+       6) Runtime view of workload groups (DMV)
+       --------------------------------------------- */
+    SELECT
+        rwg.group_id,
+        [Workload Group]        = wg.name,
+        [Parent Pool]           = rp.name,
+        rwg.total_request_count,
+        rwg.active_request_count,
+        rwg.queued_request_count,
+        rwg.total_cpu_limit_violation_count,
+        rwg.total_cpu_violation_count,
+        rwg.total_lock_wait_count,
+        rwg.total_memory_kb,
+        rwg.used_memory_kb,
+        rwg.request_max_memory_grant_percent
+    FROM sys.dm_resource_governor_workload_groups AS rwg
+    JOIN sys.resource_governor_workload_groups AS wg
+      ON rwg.group_id = wg.group_id
+    JOIN sys.resource_governor_resource_pools AS rp
+      ON wg.pool_id = rp.pool_id
+    ORDER BY rp.name, wg.name;
+END
+ELSE
+BEGIN
+    PRINT 'Note: DMV sections were skipped because VIEW SERVER STATE permission is not present.';
+END;
+
+PRINT REPLICATE('=', 90);
+Msg 207, Level 16, State 1, Line 27
+Invalid column name 'is_reconfiguration_pending'.
+
+Completion time: 2026-04-03T00:29:34.2799936-04:00
+
+/* ----------------------------------------------------
+   7) External resource pools / workload groups (if any)
+   ---------------------------------------------------- */
+IF OBJECT_ID('sys.resource_governor_external_resource_pools') IS NOT NULL
+BEGIN
+    SELECT
+        erp.external_pool_id,
+        [External Pool]         = erp.name,
+        erp.min_cpu_percent,
+        erp.max_cpu_percent,
+        erp.cap_cpu_percent,
+        erp.min_memory_percent,
+        erp.max_memory_percent
+    FROM sys.resource_governor_external_resource_pools AS erp
+    ORDER BY erp.external_pool_id;
+
+    PRINT REPLICATE('-', 90);
+
+    IF OBJECT_ID('sys.dm_resource_governor_external_resource_pools') IS NOT NULL
+    BEGIN
+        SELECT
+            derp.external_pool_id,
+            [External Pool]     = erp.name,
+            derp.total_memory_kb,
+            derp.used_memory_kb,
+            derp.target_memory_kb
+        FROM sys.dm_resource_governor_external_resource_pools AS derp
+        JOIN sys.resource_governor_external_resource_pools AS erp
+          ON derp.external_pool_id = erp.external_pool_id
+        ORDER BY derp.external_pool_id;
+    END
+END
+ELSE
+BEGIN
+    PRINT 'No external resource pools present on this instance.';
+END
