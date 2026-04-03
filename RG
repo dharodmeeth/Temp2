@@ -1,40 +1,56 @@
---SELECT [ServerName] = @@SERVERNAME, [@Current_max_cpu_percent] = rpool.max_cpu_percent, [@Current_max_memory_percent] = rpool.max_memory_percent
---FROM sys.dm_resource_governor_resource_pools AS rpool
---WHERE rpool.name = N'poolReportWizard'
---vwmazinvtsql12    65    65 (Primary)
---vwmazinvtsql13    85    85 (Secondary)
 DECLARE @RoleDesc NVARCHAR(60) = N'N/A';
+
 SELECT @RoleDesc = a.role_desc
 FROM sys.dm_hadr_availability_replica_states AS a
-WHERE a.is_local = 1
+WHERE a.is_local = 1;
 
-DECLARE @MAX_MEMORY_PERCENT INT, @REQUEST_MAX_MEMORY_GRANT_PERCENT INT  
+DECLARE @MAX_MEMORY_PERCENT INT, @REQUEST_MAX_MEMORY_GRANT_PERCENT INT;
+
 SELECT 
- --[ServerName] = @@SERVERNAME, 
- --[@Current_max_cpu_percent] = rpool.max_cpu_percent, 
- @max_memory_percent = rpool.max_memory_percent,
- @REQUEST_MAX_MEMORY_GRANT_PERCENT = rgroup.request_max_memory_grant_percent
+    @MAX_MEMORY_PERCENT = rpool.max_memory_percent,
+    @REQUEST_MAX_MEMORY_GRANT_PERCENT = rgroup.request_max_memory_grant_percent
 FROM sys.dm_resource_governor_resource_pools AS rpool
-    LEFT OUTER JOIN sys.dm_resource_governor_workload_groups AS rgroup ON rpool.pool_id = rgroup.pool_id
-WHERE rpool.name = N'poolReportWizard'  
+LEFT OUTER JOIN sys.dm_resource_governor_workload_groups AS rgroup 
+    ON rpool.pool_id = rgroup.pool_id
+WHERE rpool.name = N'poolReportWizard';
 
+DECLARE @MaxServerMemory INT, @MaxServerMemoryInUse INT;
 
-DECLARE @MaxServerMemory INT, @MaxServerMemoryInUse INT
-SELECT @MaxServerMemory = CONVERT(INT, c.value), @MaxServerMemoryInUse = CONVERT(INT, c.value_in_use)
+SELECT 
+    @MaxServerMemory = CONVERT(INT, c.value),
+    @MaxServerMemoryInUse = CONVERT(INT, c.value_in_use)
 FROM master.sys.configurations c 
-WHERE c.[name] = N'max server memory (MB)'
+WHERE c.[name] = N'max server memory (MB)';
 
-DECLARE @WindowsOSMemory INT = (SELECT total_physical_memory_kb/1024 FROM master.sys.dm_os_sys_memory)
+DECLARE @WindowsOSMemory INT = 
+(
+    SELECT total_physical_memory_kb / 1024 
+    FROM master.sys.dm_os_sys_memory
+);
 
 IF @MaxServerMemory = 2147483647  -- Not configured yet
- set @MaxServerMemory = @WindowsOSMemory
+    SET @MaxServerMemory = @WindowsOSMemory;
 
-SELECT [SQLServerName] = @@SERVERNAME, 
- [AOAG_RoleDescription] = @RoleDesc,
- [@WindowsOSMemory] = @WindowsOSMemory,
- [@MaxSQLServerMemory_MB] = @MaxServerMemory, 
- [@MAX_MEMORY_PERCENT] = @MAX_MEMORY_PERCENT,
- [@REQUEST_MAX_MEMORY_GRANT_PERCENT] = @REQUEST_MAX_MEMORY_GRANT_PERCENT,
- [@MaxMemForRW_MB] = (@MaxServerMemory * @MAX_MEMORY_PERCENT)/100, 
- [@MaxMemPerRWQuery_MB] = (@MaxServerMemory * @MAX_MEMORY_PERCENT)/100 * CONVERT(INT, @REQUEST_MAX_MEMORY_GRANT_PERCENT)/100 
+-- ✅ NEW: RG Enabled flag
+DECLARE @RG_Enabled VARCHAR(10);
+
+SELECT @RG_Enabled = 
+    CASE is_enabled 
+        WHEN 1 THEN 'YES' 
+        ELSE 'NO' 
+    END
+FROM sys.resource_governor_configuration;
+
+SELECT 
+    [SQLServerName] = @@SERVERNAME, 
+    [AOAG_RoleDescription] = @RoleDesc,
+    [RG_Enabled] = @RG_Enabled,
+    [@WindowsOSMemory] = @WindowsOSMemory,
+    [@MaxSQLServerMemory_MB] = @MaxServerMemory, 
+    [@MAX_MEMORY_PERCENT] = @MAX_MEMORY_PERCENT,
+    [@REQUEST_MAX_MEMORY_GRANT_PERCENT] = @REQUEST_MAX_MEMORY_GRANT_PERCENT,
+    [@MaxMemForRW_MB] = (@MaxServerMemory * @MAX_MEMORY_PERCENT) / 100, 
+    [@MaxMemPerRWQuery_MB] = 
+        (@MaxServerMemory * @MAX_MEMORY_PERCENT) / 100 
+        * CONVERT(INT, @REQUEST_MAX_MEMORY_GRANT_PERCENT) / 100;
 GO
