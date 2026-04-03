@@ -1,24 +1,155 @@
-Msg 207, Level 16, State 1, Line 169
-Invalid column name 'total_memory_kb'.
-Msg 207, Level 16, State 1, Line 172
-Invalid column name 'blocked_process_count'.
-Msg 207, Level 16, State 1, Line 190
-Invalid column name 'total_cpu_violation_count'.
-Msg 207, Level 16, State 1, Line 192
-Invalid column name 'total_memory_kb'.
-Msg 207, Level 16, State 1, Line 193
-Invalid column name 'used_memory_kb'.
-Msg 207, Level 16, State 1, Line 216
-Invalid column name 'min_cpu_percent'.
-Msg 207, Level 16, State 1, Line 220
-Invalid column name 'cap_cpu_percent'.
-Msg 207, Level 16, State 1, Line 223
-Invalid column name 'min_memory_percent'.
-Msg 207, Level 16, State 1, Line 237
-Invalid column name 'total_memory_kb'.
-Msg 207, Level 16, State 1, Line 238
-Invalid column name 'used_memory_kb'.
-Msg 207, Level 16, State 1, Line 239
-Invalid column name 'target_memory_kb'.
+SET NOCOUNT ON;
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 
-Completion time: 2026-04-03T00:37:29.2285569-04:00
+DECLARE @instance sysname       = @@SERVERNAME;
+DECLARE @version  nvarchar(128) = CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128));
+DECLARE @edition  nvarchar(128) = CAST(SERVERPROPERTY('Edition') AS nvarchar(128));
+DECLARE @engine   nvarchar(128) = CAST(SERVERPROPERTY('EngineEdition') AS nvarchar(128));
+
+DECLARE @max_server_memory_mb bigint;
+
+SELECT @max_server_memory_mb = CAST(value_in_use AS bigint)
+FROM sys.configurations
+WHERE name = 'max server memory (MB)';
+
+PRINT REPLICATE('=', 90);
+PRINT '1) Instance / Resource Governor status';
+PRINT REPLICATE('=', 90);
+
+SELECT
+    [Report Time (UTC)] = CONVERT(datetime2(0), SYSUTCDATETIME()),
+    [Instance]          = @instance,
+    [Product Version]   = @version,
+    [Edition]           = @edition,
+    [EngineEdition]     = @engine,
+    [RG Enabled?]       = CASE is_enabled WHEN 1 THEN 'YES' ELSE 'NO' END,
+    [Classifier Function] =
+        COALESCE(
+            QUOTENAME(OBJECT_SCHEMA_NAME(classifier_function_id)) + '.' +
+            QUOTENAME(OBJECT_NAME(classifier_function_id)),
+            '<none>'
+        )
+FROM sys.resource_governor_configuration;
+
+PRINT REPLICATE('-', 90);
+PRINT '2) Classifier function definition';
+PRINT REPLICATE('-', 90);
+
+DECLARE @classifier_id int;
+
+SELECT @classifier_id = classifier_function_id
+FROM sys.resource_governor_configuration;
+
+IF @classifier_id IS NOT NULL
+BEGIN
+    SELECT
+        [Classifier Function] = QUOTENAME(OBJECT_SCHEMA_NAME(@classifier_id)) + '.' + QUOTENAME(OBJECT_NAME(@classifier_id)),
+        [Created Date]        = OBJECTPROPERTYEX(@classifier_id, 'CreationDate'),
+        [Is Schema Bound?]    = CASE WHEN OBJECTPROPERTYEX(@classifier_id, 'IsSchemaBound') = 1 THEN 'YES' ELSE 'NO' END,
+        [Definition]          = OBJECT_DEFINITION(@classifier_id);
+END
+ELSE
+BEGIN
+    SELECT
+        [Classifier Function] = '<none configured>',
+        [Created Date]        = NULL,
+        [Is Schema Bound?]    = NULL,
+        [Definition]          = NULL;
+END
+
+PRINT REPLICATE('-', 90);
+PRINT '3) Resource pools';
+PRINT REPLICATE('-', 90);
+
+IF OBJECT_ID('tempdb..#resource_pools') IS NOT NULL
+    DROP TABLE #resource_pools;
+
+CREATE TABLE #resource_pools
+(
+    pool_id int,
+    name sysname,
+    min_cpu_percent int NULL,
+    max_cpu_percent int NULL,
+    cap_cpu_percent int NULL,
+    min_memory_percent int NULL,
+    max_memory_percent int NULL,
+    min_iops_per_volume int NULL,
+    max_iops_per_volume int NULL
+);
+
+DECLARE @sql nvarchar(max);
+
+SET @sql = N'
+INSERT INTO #resource_pools
+(
+    pool_id, name, min_cpu_percent, max_cpu_percent, cap_cpu_percent,
+    min_memory_percent, max_memory_percent, min_iops_per_volume, max_iops_per_volume
+)
+SELECT
+    pool_id,
+    name,
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','min_cpu_percent') IS NOT NULL
+             THEN 'CAST(min_cpu_percent AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','max_cpu_percent') IS NOT NULL
+             THEN 'CAST(max_cpu_percent AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','cap_cpu_percent') IS NOT NULL
+             THEN 'CAST(cap_cpu_percent AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','min_memory_percent') IS NOT NULL
+             THEN 'CAST(min_memory_percent AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','max_memory_percent') IS NOT NULL
+             THEN 'CAST(max_memory_percent AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','min_iops_per_volume') IS NOT NULL
+             THEN 'CAST(min_iops_per_volume AS int)' ELSE 'CAST(NULL AS int)' END + ',
+    ' + CASE WHEN COL_LENGTH('sys.resource_governor_resource_pools','max_iops_per_volume') IS NOT NULL
+             THEN 'CAST(max_iops_per_volume AS int)' ELSE 'CAST(NULL AS int)' END + '
+FROM sys.resource_governor_resource_pools;
+';
+
+EXEC sys.sp_executesql @sql;
+
+SELECT
+    pool_id,
+    [Pool Name]        = name,
+    [Min CPU %]        = min_cpu_percent,
+    [Max CPU %]        = max_cpu_percent,
+    [Cap CPU %]        = cap_cpu_percent,
+    [Min Mem %]        = min_memory_percent,
+    [Max Mem %]        = max_memory_percent,
+    [Min Mem (MB est)] = CASE
+                            WHEN @max_server_memory_mb IS NOT NULL AND min_memory_percent IS NOT NULL
+                            THEN (@max_server_memory_mb * min_memory_percent) / 100
+                            ELSE NULL
+                         END,
+    [Max Mem (MB est)] = CASE
+                            WHEN @max_server_memory_mb IS NOT NULL AND max_memory_percent IS NOT NULL
+                            THEN (@max_server_memory_mb * max_memory_percent) / 100
+                            ELSE NULL
+                         END,
+    [Min IOPS/Vol]     = min_iops_per_volume,
+    [Max IOPS/Vol]     = max_iops_per_volume
+FROM #resource_pools
+ORDER BY pool_id;
+
+PRINT REPLICATE('-', 90);
+PRINT '4) Workload groups';
+PRINT REPLICATE('-', 90);
+
+SELECT
+    wg.group_id,
+    [Workload Group]                  = wg.name,
+    [Parent Pool]                     = rp.name,
+    [Importance]                      = wg.importance,
+    [Request Max Mem Grant %]         = wg.request_max_memory_grant_percent,
+    [Request Max CPU Time (sec)]      = wg.request_max_cpu_time_sec,
+    [Request Mem Grant Timeout (sec)] = wg.request_memory_grant_timeout_sec,
+    [Max DOP]                         = wg.max_dop,
+    [Group Max Requests]              = wg.group_max_requests
+FROM sys.resource_governor_workload_groups AS wg
+JOIN sys.resource_governor_resource_pools AS rp
+    ON wg.pool_id = rp.pool_id
+ORDER BY rp.name, wg.name;
+
+IF OBJECT_ID('tempdb..#resource_pools') IS NOT NULL
+    DROP TABLE #resource_pools;
+
+PRINT REPLICATE('=', 90);
